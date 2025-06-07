@@ -1,0 +1,64 @@
+search:
+  algorithm: mcts
+  algorithm_config:
+    C: 1.4
+    default_prior: 0.5
+    use_prior: True
+    prune_cycles_in_search: True
+    search_rewards:
+      - state score
+  max_transforms: 6
+  iteration_limit: 100
+  return_first: false
+  time_limit: 120
+  exclude_target_from_stock: True
+  break_bonds_operator: or
+
+policy:
+  - uspto
+  - ringbreaker
+
+expansion:
+  uspto:
+    type: template-based
+    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_model.onnx
+    template: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_templates.csv.gz
+    template_column: retro_template
+    cutoff_cumulative: 0.995
+    cutoff_number: 50
+    use_rdchiral: True
+    use_remote_models: True
+  ringbreaker:
+    type: template-based
+    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_ringbreaker_model.onnx
+    template: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_ringbreaker_templates.csv.gz
+    template_column: retro_template
+    cutoff_cumulative: 0.995
+    cutoff_number: 50
+    use_rdchiral: True
+    use_remote_models: True
+
+filter:
+  uspto:
+    type: quick-filter
+    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_filter_model.onnx
+    exclude_from_policy: rc
+    filter_cutoff: 0.05
+    use_remote_models: True
+
+stock:
+  zinc:
+    type: inchiset
+    path: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/zinc_stock.hdf5
+# expansion:
+#   uspto:
+#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_model.onnx
+#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_templates.csv.gz
+#   ringbreaker:
+#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_ringbreaker_model.onnx
+#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_ringbreaker_templates.csv.gz
+# filter:
+#   uspto: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_filter_model.onnx
+# stock:
+#   zinc: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/zinc_stock.hdf5
+

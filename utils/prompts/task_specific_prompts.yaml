@@ -1,0 +1,107 @@
+# utils/prompts/task_specific_prompts.yaml
+
+summarize_text_generic:
+  prompt: "Please provide a concise summary of the following text:\n\n---\n{text_content}\n---"
+  input_variables: ["text_content"]
+  description: "A generic prompt to summarize any given text."
+
+summarize_arxiv_abstract:
+  prompt: >
+    Summarize the following ArXiv abstract in 3-5 bullet points,
+    highlighting the core problem, methods used, key findings, and main contributions.
+    Abstract:
+    ---
+    {abstract_text}
+    ---
+  input_variables: ["abstract_text"]
+  description: "Summarizes an ArXiv paper abstract, focusing on specific academic aspects."
+
+summarize_github_readme:
+  prompt: >
+    Based on the following GitHub README content, provide:
+    1. A one-sentence overview of the project.
+    2. Key features or functionalities (bullet points).
+    3. The primary technologies or languages used (if mentioned).
+    4. How to get started or install the project (briefly, if mentioned).
+
+    README Content:
+    ---
+    {readme_content}
+    ---
+  input_variables: ["readme_content"]
+  description: "Summarizes a GitHub README, focusing on project overview and practical information."
+
+extract_entities_from_text:
+  prompt: >
+    From the following text, extract the specified entities: {entities_to_extract}.
+    Present the extracted information clearly. If an entity is not found, indicate that.
+
+    Text:
+    ---
+    {text_content}
+    ---
+  input_variables: ["text_content", "entities_to_extract"]
+  description: "Extracts a list of specified entities from a given text."
+
+analyze_code_snippet:
+  prompt: >
+    Analyze the following code snippet. Explain its functionality, identify potential issues (e.g., bugs, inefficiencies, security vulnerabilities),
+    and suggest improvements if any. Assume the language is {code_language} if not obvious.
+
+    Code Snippet:
+    ---
+    {code_snippet}
+    ---
+  input_variables: ["code_snippet", "code_language"]
+  description: "Analyzes a code snippet for functionality, issues, and improvements."
+
+  # New prompt to elaborate on a single synthesis step
+elaborate_synthesis_step:
+  input_variables: ["reaction_smiles"]
+  prompt: |
+    As a senior organic chemist, analyze the following chemical reaction represented by its reaction SMILES:
+    Reaction: {reaction_smiles}
+
+    Based on this transformation, provide a concise, plausible description for a bench chemist. Your response should be a JSON object with the following keys:
+    - "title": A descriptive title for the reaction (e.g., "Friedel-Crafts Acylation", "Williamson Ether Synthesis", "Grignard Reaction").
+    - "conditions": A string describing plausible reagents, catalysts, solvents, and temperature (e.g., "Reagents: NaH, THF. Conditions: 0 C to RT, 12h").
+    - "notes": A brief, one-sentence note about a potential challenge or key consideration (e.g., "Requires anhydrous conditions to prevent quenching of the base.").
+    
+    Example input: C1=CC=C(C=C1)O.CCOBr>>C1=CC=C(C=C1)OCC
+    Example output:
+    {{
+      "title": "Williamson Ether Synthesis",
+      "conditions": "Sodium hydride (NaH), Tetrahydrofuran (THF), 0°C to room temperature, 4h",
+      "notes": "Ensure complete deprotonation of the phenol before adding the alkyl bromide to minimize side reactions."
+    }}
+
+    Provide only the JSON object in your response.
+
+# New prompt to evaluate a full synthesis route
+evaluate_synthesis_route:
+  input_variables: ["route_description"]
+  prompt: |
+    As a process chemist, evaluate the following multi-step synthesis route described by the sequence of reaction titles and their yields.
+    Route Description:
+    {route_description}
+
+    Provide a brief evaluation as a JSON object with two keys: "advantages" and "challenges". Each key should have a list of two or three short, insightful strings.
+    
+    Example Input:
+    "Step 1: Friedel-Crafts Acylation (Yield: 85%) -> Step 2: Demethylation with BBr3 (Yield: 78%) -> Step 3: Alkylation (Yield: 65%)"
+    
+    Example Output:
+    {{
+      "advantages": [
+        "Uses well-established and high-yielding reaction types.",
+        "Starting materials are likely inexpensive and commercially available.",
+        "Convergent route with a good overall yield."
+      ],
+      "challenges": [
+        "The use of BBr3 requires stringent anhydrous and low-temperature conditions.",
+        "Friedel-Crafts reactions can sometimes suffer from regioselectivity issues.",
+        "Multiple purification steps might be required, impacting overall efficiency."
+      ]
+    }}
+
+    Provide only the JSON object in your response.
