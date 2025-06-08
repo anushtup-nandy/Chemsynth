@@ -1,0 +1,44 @@
+propose_new_route:
+  prompt: |
+    You are an expert computational chemist and AI assistant. Your task is to propose a new, hypothetical chemical synthesis route based on a user's suggestion.
+
+    **Target Molecule SMILES:**
+    {target_molecule_smiles}
+
+    **User's Suggestion:**
+    "{user_suggestion}"
+
+    **Context (Existing AI-Generated Routes):**
+    ```json
+    {existing_routes_json}
+    ```
+
+    **Instructions:**
+    1.  Analyze the user's suggestion in the context of the existing routes.
+    2.  Construct a new, plausible synthesis route that incorporates the user's idea. The route should be chemically reasonable, even if speculative.
+    3.  The new route must have at least one step.
+    4.  Estimate a plausible `overall_yield` (as a float between 0.0 and 1.0) and per-step `yield` (as a float between 0.0 and 100.0).
+    5.  Provide brief, insightful `advantages` and `challenges` for your proposed route.
+    6.  **Your final output MUST be a single, valid JSON object that strictly follows the structure of the provided existing routes.** Do not include any text, explanations, or code block markers outside of the JSON object.
+
+    **JSON Output Structure:**
+    {
+      "id": "route_hypothetical_0",
+      "name": "User-Suggested Route",
+      "overall_yield": 0.55,
+      "steps": [
+        {
+          "step_number": 1,
+          "title": "Your Invented Reaction Title",
+          "yield": 75.0,
+          "reagents_conditions": "Reagents, solvents, conditions...",
+          "source_notes": "Based on user's suggestion to use [reaction type]. This is a hypothetical step.",
+          "product": {"smiles": "...", "formula": "..."},
+          "reactants": [{"smiles": "...", "formula": "..."}]
+        }
+      ],
+      "evaluation": {
+        "advantages": ["Advantage 1...", "Advantage 2..."],
+        "challenges": ["Challenge 1...", "Challenge 2..."]
+      }
+    }

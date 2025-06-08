@@ -13,6 +13,41 @@ from utils.prompt_loader import format_prompt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def resolve_molecule_identifier(identifier: str) -> str | None:
+    """
+    Resolves a molecule identifier (SMILES, Name, or CAS) to a SMILES string.
+    Returns the SMILES string or None if not found.
+    """
+    identifier = identifier.strip()
+    logger.info(f"Attempting to resolve identifier: {identifier}")
+
+    # 1. Check if it's already a valid SMILES
+    mol = Chem.MolFromSmiles(identifier, sanitize=False)
+    if mol is not None:
+        try:
+            Chem.SanitizeMol(mol)
+            logger.info("Identifier is a valid SMILES string.")
+            return identifier
+        except Exception:
+            pass # Invalid SMILES, proceed to lookup
+
+    # 2. If not a valid SMILES, query PubChem by name/CAS
+    try:
+        logger.info(f"Querying PubChem for '{identifier}'...")
+        # PubChemPy's 'name' namespace searches names, synonyms, and CAS RNs
+        results = pcp.get_compounds(identifier, 'name')
+        if results:
+            compound = results[0]
+            smiles = compound.isomeric_smiles
+            logger.info(f"Resolved '{identifier}' to SMILES: {smiles}")
+            return smiles
+        else:
+            logger.warning(f"Identifier '{identifier}' could not be resolved by PubChem.")
+            return None
+    except Exception as e:
+        logger.error(f"An error occurred during PubChem lookup for '{identifier}': {e}")
+        return None
+
 # --- RDKit Helper Functions ---
 def get_smiles_from_molecule(mol):
     """
@@ -121,15 +156,15 @@ def initialize_aizynthfinder(config_path: str) -> dict:
         logger.error(f"Error initializing AiZynthFinder: {e}", exc_info=True)
         return {"finder": None, "error": f"An unexpected error occurred during AiZynthFinder initialization: {str(e)}"}
 
-# --- Main Synthesis Planning Logic (with the CORRECTED NAMES) ---
-def plan_synthesis_route(target_smiles: str) -> dict:
+# --- Main Synthesis Planning Logic (FIXED) ---
+def plan_synthesis_route(target_identifier: str) -> dict:
     """
     Plans synthesis routes for a target molecule using AiZynthFinder
     and elaborates the steps using an LLM.
     """
-    target_mol = Chem.MolFromSmiles(target_smiles)
-    if not target_mol:
-        return {"error": "Invalid target SMILES string provided."}
+    target_smiles = resolve_molecule_identifier(target_identifier)
+    if not target_smiles:
+        return {"error": f"Invalid or unknown molecule identifier: '{target_identifier}'. Could not resolve to a SMILES string."}
 
     try:
         config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'config.yml'))
@@ -147,7 +182,6 @@ def plan_synthesis_route(target_smiles: str) -> dict:
         finder.stock.select("zinc")  # Matches the stock name in config.yml
         finder.expansion_policy.select(["uspto", "ringbreaker"])  # Select both policies at once
         finder.filter_policy.select("uspto")  # Matches filter policy name in config.yml
-        # ***************************************************************
         
         logger.info("Policies and stock selected. Preparing search tree.")
         finder.prepare_tree()
@@ -182,35 +216,41 @@ def plan_synthesis_route(target_smiles: str) -> dict:
              return {"error": f"AiZynthFinder Error: A specified policy or stock name in the config is unknown. Details: {e}"}
         return {"error": f"Failed to run synthesis planning: {str(e)}"}
 
-    # --- Route Processing Logic (Fixed for dict routes) ---
+    # --- FIXED Route Processing Logic ---
     routes_data = []
     try:
-        # Handle both dict and object routes
+        # Helper function to get route score
         def get_route_score(route):
             try:
                 if isinstance(route, dict):
-                    score = route.get('score', 0.0)
+                    score_obj = route.get('score', 0.0)
                 else:
-                    score = getattr(route, 'score', 0.0)
+                    score_obj = getattr(route, 'score', 0.0)
                 
-                # Ensure score is numeric
+                # Check if the score object is a dictionary and extract the numerical score
+                if isinstance(score_obj, dict):
+                    score = score_obj.get('state score', 0.0)
+                else:
+                    score = score_obj
+
+                # Ensure the final score is numeric
                 if isinstance(score, (int, float)):
                     return float(score)
                 else:
-                    logger.warning(f"Non-numeric score found: {score}, type: {type(score)}")
+                    logger.warning(f"Could not extract a numeric score from: {score_obj}, type: {type(score_obj)}")
                     return 0.0
             except Exception as e:
                 logger.warning(f"Error getting route score: {e}")
                 return 0.0
         
         def get_reaction_tree(route):
+            """Get reaction tree from route, handling both dict and object formats"""
             if isinstance(route, dict):
                 return route.get('reaction_tree', None)
             else:
                 return getattr(route, 'reaction_tree', None)
         
-        # FIX: Create a stable sort key that includes both score and index
-        # This prevents the comparison of dict objects when scores are equal
+        # Create a stable sort key that includes both score and index
         routes_with_index = [(route, idx) for idx, route in enumerate(routes)]
         sorted_routes_with_index = sorted(
             routes_with_index, 
@@ -235,7 +275,14 @@ def plan_synthesis_route(target_smiles: str) -> dict:
                 if reaction_tree is None:
                     logger.warning(f"No reaction tree found for route {index}")
                     continue
-                reaction_steps = list(reaction_tree.reactions())
+                
+                # FIXED: Check if reaction_tree has reactions method before calling it
+                if hasattr(reaction_tree, 'reactions') and callable(getattr(reaction_tree, 'reactions')):
+                    reaction_steps = list(reaction_tree.reactions())
+                else:
+                    logger.warning(f"Reaction tree for route {index} does not have a reactions() method")
+                    continue
+                    
             except Exception as e:
                 logger.warning(f"Could not extract reactions from route {index}: {e}")
                 continue
@@ -245,7 +292,11 @@ def plan_synthesis_route(target_smiles: str) -> dict:
                     reactants_smiles = [get_smiles_from_molecule(mol) for group in reaction.reactants for mol in group if mol]
                     product_smiles = get_smiles_from_molecule(reaction.mol)
                     
-                    if not reactants_smiles or not product_smiles: continue
+                    if not reactants_smiles or not product_smiles: 
+                        continue
+                    
+                    # Prioritize 'plausibility', fall back to 'template_score'
+                    yield_value = reaction.metadata.get('plausibility', reaction.metadata.get('template_score', 0.0)) * 100
                     
                     reaction_smiles_str = f"{'.'.join(reactants_smiles)}>>{product_smiles}"
                     step_details = {"title": "Reaction", "conditions": "N/A", "notes": "N/A"}
@@ -260,7 +311,6 @@ def plan_synthesis_route(target_smiles: str) -> dict:
                     except Exception as e:
                         logger.warning(f"LLM elaboration failed for step {step_index}: {e}")
 
-                    yield_value = reaction.metadata.get('template_score', 0.0) * 100
                     route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.0f}%)")
 
                     route_info["steps"].append({
@@ -276,6 +326,7 @@ def plan_synthesis_route(target_smiles: str) -> dict:
                     logger.error(f"Error processing step {step_index} in route {index}: {e}", exc_info=True)
                     continue
             
+            # LLM Route Evaluation
             if route_description_for_eval:
                 try:
                     eval_prompt = format_prompt("evaluate_synthesis_route", route_description=" -> ".join(route_description_for_eval))
@@ -289,9 +340,54 @@ def plan_synthesis_route(target_smiles: str) -> dict:
             
             if route_info["steps"]:
                 routes_data.append(route_info)
+
     except Exception as e:
-        logger.error(f"A critical error occurred while processing the found routes: {e}", exc_info=True)
-        return {"error": f"An error occurred while processing the synthesis routes: {str(e)}"}
+        logger.error(f"Critical error processing routes: {e}", exc_info=True)
+        return {"error": f"An error occurred while processing synthesis routes: {str(e)}"}
 
     logger.info(f"Successfully processed and returning {len(routes_data)} routes")
     return {"routes": routes_data}
+
+def generate_hypothetical_route(suggestion: str, existing_routes: list, target_smiles: str) -> dict | None:
+    """
+    Uses an LLM to generate a new, hypothetical synthesis route based on user suggestion.
+    """
+    logger.info(f"Generating hypothetical route for '{target_smiles}' based on suggestion: '{suggestion}'")
+    try:
+        # Format existing routes for the prompt context
+        context_str = json.dumps(existing_routes, indent=2)
+        
+        prompt = format_prompt(
+            "propose_new_route",  # You'll need to create this prompt template
+            user_suggestion=suggestion,
+            target_molecule_smiles=target_smiles,
+            existing_routes_json=context_str
+        )
+        if not prompt:
+            logger.error("Could not format the 'propose_new_route' prompt.")
+            return None
+
+        # Call the LLM
+        response = generate_text(prompt, temperature=0.6)
+        if not response:
+            logger.warning("LLM returned an empty response for hypothetical route.")
+            return None
+
+        # Clean and parse the JSON response from the LLM
+        cleaned_response = response.strip().replace('```json', '').replace('```', '').strip()
+        new_route_data = json.loads(cleaned_response)
+
+        # Basic validation of the LLM output
+        if "id" in new_route_data and "steps" in new_route_data:
+            logger.info("Successfully generated and parsed a new hypothetical route.")
+            return {"new_route": new_route_data}
+        else:
+            logger.error(f"LLM output was malformed: {cleaned_response}")
+            return None
+
+    except json.JSONDecodeError:
+        logger.error(f"Failed to decode LLM response into JSON. Response: {response}")
+        return None
+    except Exception as e:
+        logger.error(f"An error occurred during hypothetical route generation: {e}", exc_info=True)
+        return None
