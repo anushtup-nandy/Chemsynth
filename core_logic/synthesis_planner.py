@@ -6,9 +6,10 @@ import pubchempy as pcp
 from aizynthfinder.aizynthfinder import AiZynthFinder
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
-
 from utils.llm_interface import generate_text
 from utils.prompt_loader import format_prompt
+from utils.reaction_utils import map_reaction, generate_reaction_image
+from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
