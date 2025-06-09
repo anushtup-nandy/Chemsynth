@@ -1,5 +1,6 @@
 // Global variables
 let synthesisRoutesData = [];
+let literatureResults = [];
 let currentTargetSMILES = ''; // Store the resolved SMILES for the "New Route" feature
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -11,37 +12,55 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchTermsInput = document.getElementById('search-terms-input');
     const literatureResultsContainer = document.getElementById('literature-results-container');
     const literatureResultsCount = document.getElementById('literature-results-count');
-    const synthesisSection = document.getElementById('synthesis-route-section');
+    const literatureSortSelect = document.getElementById('literature-sort-select');
+    
+    const synthesisContent = document.getElementById('synthesis-content');
     const routeTabsContainer = document.getElementById('synthesis-route-tabs-container');
     const routeContentContainer = document.getElementById('synthesis-route-content-container');
-    const newRouteButton = document.getElementById('new-route-btn'); // Selects the button with the new ID
+    const newRouteButton = document.getElementById('new-route-btn');
+
+    const progressBar = document.getElementById('project-progress-bar');
+    const progressStepsContainer = document.getElementById('project-progress-steps');
+    const mainTabs = document.getElementById('main-tabs');
+
+    // --- Initial State Setup ---
+    updateProgress(0); // Initialize progress bar
+    setupTabControls(); // Activate main tabs
 
     // --- Event Listeners ---
-    if (searchButton) {
-        searchButton.addEventListener('click', handleSearch);
-    }
-    if (newRouteButton) {
-        newRouteButton.addEventListener('click', handleNewRoute);
-    }
+    searchButton.addEventListener('click', handleSearch);
+    newRouteButton.addEventListener('click', handleNewRoute);
+    literatureSortSelect.addEventListener('change', handleSortLiterature);
 
     // --- Main Handler Functions ---
-    function handleSearch(event) {
+    async function handleSearch(event) {
         event.preventDefault();
         const identifier = targetMoleculeInput.value.trim();
         const keywords = searchTermsInput.value.trim();
-        const literatureQuery = (identifier + ' ' + keywords).trim();
 
         if (!identifier) {
             alert("Please enter a target molecule identifier (SMILES, Name, or CAS).");
             return;
         }
 
-        if (literatureQuery) {
-            fetchLiterature(literatureQuery);
+        updateProgress(0, true); // Reset and show loading
+        
+        // --- MODIFIED: Resolve identifier before searching ---
+        try {
+            const resolvedData = await resolveIdentifier(identifier);
+            if (resolvedData) {
+                // Use the resolved name for literature search and the original identifier for synthesis planning
+                const literatureQuery = (resolvedData.name + ' ' + keywords).trim();
+                fetchLiterature(literatureQuery);
+                fetchSynthesisPlan(identifier); // Synthesis planner can handle raw identifier
+                document.getElementById('project-target-molecule-name').textContent = `Target: ${resolvedData.name}`;
+            }
+        } catch (error) {
+            alert(error.message);
+            updateProgress(0); // Revert progress on failure
         }
-        fetchSynthesisPlan(identifier);
     }
-    
+
     async function handleNewRoute() {
         if (!currentTargetSMILES) {
             alert("Please perform a search for a target molecule first.");
@@ -49,11 +68,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const suggestion = prompt("Suggest an alternative reaction or approach (e.g., 'Use a Suzuki coupling for step 1'):");
-        if (!suggestion || suggestion.trim() === '') {
-            return; // User cancelled or entered nothing
-        }
+        if (!suggestion || suggestion.trim() === '') return;
 
-        const originalButtonText = this.innerHTML;
         this.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Generating...';
         this.disabled = true;
 
@@ -68,36 +84,63 @@ document.addEventListener('DOMContentLoaded', function() {
                 }),
             });
             const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to generate new route.');
-            }
+            if (!response.ok) throw new Error(data.error || 'Failed to generate new route.');
             
             addNewRouteToDisplay(data.new_route);
-
         } catch (error) {
             console.error('Error generating new route:', error);
             alert(`Error: ${error.message}`);
         } finally {
-            this.innerHTML = originalButtonText;
+            this.innerHTML = '<i class="fas fa-plus mr-2"></i> New Route';
             this.disabled = false;
         }
     }
-    
+
+    function handleSortLiterature() {
+        const sortBy = literatureSortSelect.value;
+        let sortedResults = [...literatureResults]; // Create a copy
+
+        if (sortBy === 'date') {
+            sortedResults.sort((a, b) => new Date(b.published) - new Date(a.published));
+        } else if (sortBy === 'citations') {
+            // NOTE: Using 'entry_id' version as a proxy for citations, as arXiv API lacks this.
+            sortedResults.sort((a, b) => {
+                const versionA = parseInt(a.entry_id.slice(-1)) || 0;
+                const versionB = parseInt(b.entry_id.slice(-1)) || 0;
+                return versionB - versionA;
+            });
+        }
+        // 'relevance' is the default from the API, so we just use the original array
+        else {
+             sortedResults = [...literatureResults];
+        }
+        
+        renderLiteratureResults(sortedResults);
+    }
+
     function addNewRouteToDisplay(newRoute) {
-        // Ensure new route has a unique ID, creating one if the LLM didn't provide it
         newRoute.id = newRoute.id || `route_hypothetical_${synthesisRoutesData.length}`;
         synthesisRoutesData.push(newRoute);
-        
-        // Re-render tabs, making the newly added route active
         renderRouteTabs(synthesisRoutesData, newRoute.id);
-        // Render the content for the new route
         renderSingleRoute(newRoute);
     }
 
     // --- API Fetching Functions ---
+    async function resolveIdentifier(identifier) {
+        const response = await fetch('/api/resolve_identifier', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifier }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to resolve molecule identifier.');
+        }
+        return data;
+    }
+
     async function fetchSynthesisPlan(identifier) {
-        synthesisSection.classList.remove('hidden');
+        synthesisContent.classList.remove('hidden');
         routeTabsContainer.innerHTML = '';
         routeContentContainer.innerHTML = '<p class="text-center text-gray-400 py-8"><i class="fas fa-spinner fa-spin mr-2"></i>Resolving identifier and planning routes...</p>';
         
@@ -109,24 +152,24 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             
             const data = await response.json();
-            if (!response.ok) { throw new Error(data.error || "An unknown error occurred."); }
+            if (!response.ok) throw new Error(data.error || "An unknown error occurred.");
             
             if (data.routes && data.routes.length > 0) {
                 synthesisRoutesData = data.routes;
                 if (data.routes[0].steps.length > 0) {
                     currentTargetSMILES = data.routes[0].steps[data.routes[0].steps.length - 1].product.smiles;
                 }
-                // Pass the ID of the first route to make it active on initial load
                 renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
                 renderSingleRoute(synthesisRoutesData[0]);
+                updateProgress(2); // Synthesis complete
             } else {
-                routeTabsContainer.innerHTML = '';
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
+                 updateProgress(1); // Only literature was successful
             }
         } catch (error) {
             console.error('Error fetching synthesis plan:', error);
-            routeTabsContainer.innerHTML = '';
             routeContentContainer.innerHTML = `<div class="text-center py-8"><p class="text-red-400 mb-2">Failed to plan synthesis.</p><p class="text-gray-500 text-sm">${error.message}</p></div>`;
+            updateProgress(1); // Only literature was successful
         }
     }
 
@@ -137,28 +180,72 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch('/api/literature_search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: query, max_results: 5 }),
+                body: JSON.stringify({ query: query, max_results: 10 }),
             });
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            renderLiteratureResults(data.papers);
+            literatureResults = data.papers || []; // Store results for sorting
+            renderLiteratureResults(literatureResults);
+            updateProgress(1); // Literature complete
         } catch (error) {
             console.error('Error fetching literature results:', error);
             literatureResultsContainer.innerHTML = `<p class="text-center text-red-400">Failed to load literature: ${error.message}</p>`;
             literatureResultsCount.textContent = 'Literature Results (Error)';
+            updateProgress(0); // Revert on failure
         }
     }
+    
+    // --- UI Control and Rendering ---
+    function setupTabControls() {
+        mainTabs.addEventListener('click', (e) => {
+            e.preventDefault();
+            const clickedTab = e.target.closest('.tab-link');
+            if (!clickedTab) return;
 
-    // --- Rendering Functions ---
+            const tabName = clickedTab.dataset.tab;
+
+            // Update tab visual state
+            document.querySelectorAll('.tab-link').forEach(tab => {
+                tab.classList.remove('border-blue-500', 'text-blue-500');
+                tab.classList.add('border-transparent', 'text-gray-500');
+            });
+            clickedTab.classList.add('border-blue-500', 'text-blue-500');
+            clickedTab.classList.remove('border-transparent', 'text-gray-500');
+
+            // Show/hide content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(`${tabName}-content`).classList.remove('hidden');
+        });
+    }
+    
+    function updateProgress(stage, isLoading = false) {
+        const stages = ['Literature', 'Synthesis', 'Sourcing', 'Costing', 'Knowledge'];
+        let width = stage * 20;
+        progressBar.style.width = `${width}%`;
+
+        let stepsHtml = '';
+        stages.forEach((name, index) => {
+            let statusClass = 'text-gray-500'; // Pending
+            if (index < stage) {
+                statusClass = 'text-green-400'; // Complete
+            } else if (index === stage) {
+                statusClass = isLoading ? 'text-blue-400 animate-pulse' : 'text-blue-400'; // Active
+            }
+            stepsHtml += `<span class="${statusClass}">${name}</span>`;
+        });
+        progressStepsContainer.innerHTML = stepsHtml;
+    }
+
     function renderRouteTabs(routes, activeRouteId) {
         let tabsHtml = `<nav class="-mb-px flex space-x-8">`;
         routes.forEach((route, index) => {
             const defaultName = `Route ${String.fromCharCode(65 + index)}`;
             const routeName = route.name || defaultName;
-            // Use activeRouteId to determine which tab is active
             const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
             tabsHtml += `<a href="#" class="${isActive} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm route-tab" data-route-id="${route.id}">
                             ${routeName} (${(route.overall_yield || 0).toFixed(1)}% yield)
@@ -167,14 +254,11 @@ document.addEventListener('DOMContentLoaded', function() {
         tabsHtml += '</nav>';
         routeTabsContainer.innerHTML = tabsHtml;
 
-        // Re-attach event listeners after re-rendering the tabs
         document.querySelectorAll('.route-tab').forEach(tab => {
             tab.addEventListener('click', function(e) {
                 e.preventDefault();
                 const routeId = this.dataset.routeId;
                 const routeData = synthesisRoutesData.find(r => r.id === routeId);
-                
-                // Re-render tabs and content to reflect the new active tab
                 renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
             });
@@ -191,7 +275,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderRouteVisualization(route) {
-        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex flex-col md:flex-row items-center justify-center mb-8 overflow-x-auto p-4">';
+        // --- MODIFIED: Changed justify-center to justify-start for scrolling ---
+        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
         if (!route.steps || route.steps.length === 0) return '';
         
         const firstReactants = route.steps[0].reactants;
@@ -211,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const textColor = isFinalProduct ? 'text-blue-400' : '';
             const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
             vizHtml += `
-                <div class="reaction-arrow flex-shrink-0 mx-2 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl"></i></div>
+                <div class="reaction-arrow flex-shrink-0 mx-4 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
                 <div class="molecule-display ${borderColor} flex-shrink-0">
                     <div class="text-center p-4">
                         <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${step.yield.toFixed(1)}% yield</div>
@@ -288,7 +373,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
                         </div>
                         <div class="flex items-center space-x-2 flex-shrink-0 ml-4">
-                            <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.primary_category}</span>
+                            <!-- MODIFIED: Added fallback for robust display -->
+                            <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.impact || 'N/A'}</span>
                         </div>
                     </div>
                     <div class="text-sm text-gray-300 mb-3">${renderedAbstract}</div>

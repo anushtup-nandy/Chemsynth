@@ -2,7 +2,7 @@
 from flask import Flask, render_template, request, jsonify
 from core_logic.literature_analysis import perform_literature_search
 # MODIFIED imports
-from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route
+from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route, resolve_molecule_identifier
 
 # Initialize Flask App
 app = Flask(__name__)
@@ -13,6 +13,35 @@ def index():
     return render_template('index.html')
 
 # --- API Endpoints ---
+
+# --- NEW UTILITY ENDPOINT ---
+@app.route('/api/resolve_identifier', methods=['POST'])
+def api_resolve_identifier():
+    """
+    Resolves a molecule identifier to its canonical SMILES and common name.
+    """
+    data = request.json
+    identifier = data.get('identifier')
+    if not identifier:
+        return jsonify({"error": "Identifier is required."}), 400
+    
+    try:
+        # We can reuse the resolver from the synthesis planner
+        smiles = resolve_molecule_identifier(identifier)
+        if not smiles:
+            return jsonify({"error": f"Could not resolve identifier: '{identifier}'"}), 404
+        
+        # Additionally, let's try to get a common name for better search queries
+        import pubchempy as pcp
+        compounds = pcp.get_compounds(smiles, 'smiles')
+        name = compounds[0].iupac_name if compounds and compounds[0].iupac_name else identifier
+        
+        return jsonify({"smiles": smiles, "name": name})
+    except Exception as e:
+        print(f"An error occurred during identifier resolution: {e}")
+        return jsonify({"error": "An internal error occurred during resolution."}), 500
+
+
 @app.route('/api/literature_search', methods=['POST'])
 def api_literature_search():
     # ... (no changes here)
@@ -78,74 +107,3 @@ def api_generate_new_route():
 # --- Main Execution ---
 if __name__ == '__main__':
     app.run(debug=True)
-
-# # app.py
-# from flask import Flask, render_template, request, jsonify
-# from core_logic.literature_analysis import perform_literature_search
-# from core_logic.synthesis_planner import plan_synthesis_route
-
-# # Initialize Flask App
-# app = Flask(__name__)
-
-# # --- Primary Route to Serve the Frontend ---
-
-# @app.route('/')
-# def index():
-#     """
-#     Renders the main single-page application UI.
-#     """
-#     # The HTML file should be in the 'templates' directory
-#     return render_template('index.html')
-
-# # --- API Endpoints ---
-
-# @app.route('/api/literature_search', methods=['POST'])
-# def api_literature_search():
-#     """
-#     API endpoint for the Literature Analysis feature.
-#     Accepts search terms and returns aggregated results.
-#     """
-#     data = request.json
-#     search_query = data.get('query')
-#     max_results = data.get('max_results', 5)
-
-#     if not search_query:
-#         return jsonify({"error": "Search query is required."}), 400
-
-#     try:
-#         # This function will orchestrate calls to utils modules
-#         results = perform_literature_search(search_query, max_results)
-#         return jsonify(results)
-#     except Exception as e:
-#         # In a production environment, log the error properly
-#         print(f"An error occurred during literature search: {e}")
-#         return jsonify({"error": "An internal error occurred."}), 500
-
-# @app.route('/api/plan_synthesis', methods=['POST'])
-# def api_plan_synthesis():
-#     """
-#     API endpoint for the Synthesis Design feature.
-#     Accepts a target molecule SMILES and returns planned routes.
-#     """
-#     data = request.json
-#     target_smiles = data.get('smiles')
-
-#     if not target_smiles:
-#         return jsonify({"error": "Target SMILES string is required."}), 400
-
-#     try:
-#         # This function orchestrates AiZynthFinder and LLM calls
-#         results = plan_synthesis_route(target_smiles)
-#         if "error" in results:
-#             return jsonify(results), 500 # Pass through specific errors
-#         return jsonify(results)
-#     except Exception as e:
-#         print(f"An unhandled error occurred during synthesis planning: {e}")
-#         return jsonify({"error": "An internal server error occurred."}), 500
-
-# # --- Main Execution ---
-
-# if __name__ == '__main__':
-#     # Flask will automatically use the settings from the .flaskenv file
-#     # for host and port during development.
-#     app.run(debug=True)

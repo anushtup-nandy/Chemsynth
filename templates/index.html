@@ -75,26 +75,26 @@
         <div class="bg-gray-800 rounded-xl p-6 mb-8">
             <h2 class="text-lg font-bold mb-4">Project Progress</h2>
             <div class="progress-bar mb-2">
-                <div id="project-progress-bar" class="progress-fill" style="width: 10%"></div>
+                <div id="project-progress-bar" class="progress-fill" style="width: 0%"></div>
             </div>
             <div id="project-progress-steps" class="flex justify-between text-sm text-gray-400">
-                <!-- Progress steps will be dynamically updated -->
+                <!-- Progress steps will be dynamically updated here -->
             </div>
         </div>
         
         <!-- Main Content Tabs -->
         <div class="border-b border-gray-700 mb-6">
-            <nav class="-mb-px flex space-x-8">
-                <a href="#" class="border-blue-500 text-blue-500 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm tab-active"><i class="fas fa-book-open mr-2"></i> Literature Analysis</a>
-                <a href="#" class="border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-project-diagram mr-2"></i> Synthesis Design</a>
-                <a href="#" class="border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-boxes mr-2"></i> Material Sourcing</a>
-                <a href="#" class="border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-calculator mr-2"></i> Cost Analysis</a>
-                <a href="#" class="border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-brain mr-2"></i> Knowledge Graph</a>
+            <nav id="main-tabs" class="-mb-px flex space-x-8">
+                <a href="#" data-tab="literature" class="tab-link border-blue-500 text-blue-500 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-book-open mr-2"></i> Literature Analysis</a>
+                <a href="#" data-tab="synthesis" class="tab-link border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-project-diagram mr-2"></i> Synthesis Design</a>
+                <a href="#" data-tab="sourcing" class="tab-link border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-boxes mr-2"></i> Material Sourcing</a>
+                <a href="#" data-tab="cost" class="tab-link border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-calculator mr-2"></i> Cost Analysis</a>
+                <a href="#" data-tab="knowledge" class="tab-link border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"><i class="fas fa-brain mr-2"></i> Knowledge Graph</a>
             </nav>
         </div>
         
         <!-- Literature Analysis Section -->
-        <div id="literature-analysis-section" class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div id="literature-content" class="tab-content grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <!-- Search Panel -->
             <div class="lg:col-span-1 bg-gray-800 rounded-xl p-6">
                 <h3 class="text-lg font-bold mb-4">Literature Search</h3>
@@ -123,7 +123,11 @@
                     <h3 id="literature-results-count" class="text-lg font-bold">Literature Results</h3>
                     <div class="flex items-center">
                         <span class="text-sm text-gray-400 mr-3">Sort by:</span>
-                        <select class="bg-gray-700 text-gray-300 text-sm p-2 rounded-lg"><option>Relevance</option><option>Citation Count</option><option>Publication Date</option></select>
+                        <select id="literature-sort-select" class="bg-gray-700 text-gray-300 text-sm p-2 rounded-lg">
+                            <option value="relevance">Relevance</option>
+                            <option value="citations">Citation Count</option>
+                            <option value="date">Publication Date</option>
+                        </select>
                     </div>
                 </div>
                 
@@ -139,7 +143,7 @@
         </div>
         
         <!-- Synthesis Route Section -->
-        <div id="synthesis-route-section" class="bg-gray-800 rounded-xl p-6 mb-8 hidden">
+        <div id="synthesis-content" class="tab-content bg-gray-800 rounded-xl p-6 mb-8 hidden">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-xl font-bold">Proposed Synthesis Routes</h2>
                 <!-- <<< MODIFIED: Added ID to this button >>> -->
@@ -160,18 +164,18 @@
         </div>
         
         <!-- Material Sourcing Section -->
-        <div id="material-sourcing-section" class="bg-gray-800 rounded-xl p-6 mb-8 hidden">
-             <!-- Content will be generated dynamically -->
+        <div id="sourcing-content" class="tab-content bg-gray-800 rounded-xl p-6 mb-8 hidden">
+             <h2 class="text-xl font-bold text-center text-gray-500 py-16">Material Sourcing feature coming soon...</h2>
         </div>
         
         <!-- Cost Analysis Section -->
-        <div id="cost-analysis-section" class="bg-gray-800 rounded-xl p-6 mb-8 hidden">
-             <!-- Content will be generated dynamically -->
+        <div id="cost-content" class="tab-content bg-gray-800 rounded-xl p-6 mb-8 hidden">
+             <h2 class="text-xl font-bold text-center text-gray-500 py-16">Cost Analysis feature coming soon...</h2>
         </div>
         
         <!-- Knowledge Graph Section -->
-        <div id="knowledge-graph-section" class="bg-gray-800 rounded-xl p-6 hidden">
-             <!-- Content will be generated dynamically -->
+        <div id="knowledge-content" class="tab-content bg-gray-800 rounded-xl p-6 hidden">
+             <h2 class="text-xl font-bold text-center text-gray-500 py-16">Knowledge Graph feature coming soon...</h2>
         </div>
         
         <!-- CTA Section -->
