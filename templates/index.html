@@ -100,7 +100,7 @@
                 <h3 class="text-lg font-bold mb-4">Literature Search</h3>
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-300 mb-1">Target Molecule or Keyword</label>
-                    <input type="text" id="target-molecule-input" class="molecule-input w-full p-3 rounded-lg" placeholder="Enter SMILES, Name, or keywords">
+                    <input type="text" id="target-molecule-input" class="molecule-input w-full p-3 rounded-lg" placeholder="Enter SMILES, Name, or CAS">
                 </div>
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-300 mb-1">Search Terms (Optional)</label>
@@ -142,7 +142,8 @@
         <div id="synthesis-route-section" class="bg-gray-800 rounded-xl p-6 mb-8 hidden">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-xl font-bold">Proposed Synthesis Routes</h2>
-                <button class="gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg">
+                <!-- <<< MODIFIED: Added ID to this button >>> -->
+                <button id="new-route-btn" class="gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg">
                     <i class="fas fa-plus mr-2"></i> New Route
                 </button>
             </div>

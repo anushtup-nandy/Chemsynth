@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const synthesisSection = document.getElementById('synthesis-route-section');
     const routeTabsContainer = document.getElementById('synthesis-route-tabs-container');
     const routeContentContainer = document.getElementById('synthesis-route-content-container');
-    const newRouteButton = document.getElementById('new-route-btn'); // Select the static button
+    const newRouteButton = document.getElementById('new-route-btn'); // Selects the button with the new ID
 
     // --- Event Listeners ---
     if (searchButton) {
@@ -85,21 +85,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function addNewRouteToDisplay(newRoute) {
-        newRoute.id = `route_hypothetical_${synthesisRoutesData.length}`;
+        // Ensure new route has a unique ID, creating one if the LLM didn't provide it
+        newRoute.id = newRoute.id || `route_hypothetical_${synthesisRoutesData.length}`;
         synthesisRoutesData.push(newRoute);
         
-        renderRouteTabs(synthesisRoutesData);
+        // Re-render tabs, making the newly added route active
+        renderRouteTabs(synthesisRoutesData, newRoute.id);
+        // Render the content for the new route
         renderSingleRoute(newRoute);
-
-        document.querySelectorAll('.route-tab').forEach(tab => {
-            tab.classList.remove('border-blue-500', 'text-blue-500');
-            tab.classList.add('border-transparent', 'text-gray-500');
-        });
-        const newTabEl = routeTabsContainer.querySelector(`[data-route-id="${newRoute.id}"]`);
-        if(newTabEl) {
-            newTabEl.classList.add('border-blue-500', 'text-blue-500');
-            newTabEl.classList.remove('border-transparent', 'text-gray-500');
-        }
     }
 
     // --- API Fetching Functions ---
@@ -123,13 +116,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.routes[0].steps.length > 0) {
                     currentTargetSMILES = data.routes[0].steps[data.routes[0].steps.length - 1].product.smiles;
                 }
-                renderRouteTabs(synthesisRoutesData);
+                // Pass the ID of the first route to make it active on initial load
+                renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
                 renderSingleRoute(synthesisRoutesData[0]);
             } else {
+                routeTabsContainer.innerHTML = '';
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
             }
         } catch (error) {
             console.error('Error fetching synthesis plan:', error);
+            routeTabsContainer.innerHTML = '';
             routeContentContainer.innerHTML = `<div class="text-center py-8"><p class="text-red-400 mb-2">Failed to plan synthesis.</p><p class="text-gray-500 text-sm">${error.message}</p></div>`;
         }
     }
@@ -157,32 +153,29 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Rendering Functions ---
-    function renderRouteTabs(routes) {
+    function renderRouteTabs(routes, activeRouteId) {
         let tabsHtml = `<nav class="-mb-px flex space-x-8">`;
         routes.forEach((route, index) => {
             const defaultName = `Route ${String.fromCharCode(65 + index)}`;
-            const routeName = route.name || defaultName; 
-            const isActive = index === (routes.length - 1) ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
+            const routeName = route.name || defaultName;
+            // Use activeRouteId to determine which tab is active
+            const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
             tabsHtml += `<a href="#" class="${isActive} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm route-tab" data-route-id="${route.id}">
-                            ${routeName} (${route.overall_yield.toFixed(1)}% yield)
+                            ${routeName} (${(route.overall_yield || 0).toFixed(1)}% yield)
                         </a>`;
         });
         tabsHtml += '</nav>';
         routeTabsContainer.innerHTML = tabsHtml;
 
+        // Re-attach event listeners after re-rendering the tabs
         document.querySelectorAll('.route-tab').forEach(tab => {
             tab.addEventListener('click', function(e) {
                 e.preventDefault();
                 const routeId = this.dataset.routeId;
                 const routeData = synthesisRoutesData.find(r => r.id === routeId);
                 
-                document.querySelectorAll('.route-tab').forEach(t => {
-                    t.classList.remove('border-blue-500', 'text-blue-500');
-                    t.classList.add('border-transparent', 'text-gray-500');
-                });
-                this.classList.add('border-blue-500', 'text-blue-500');
-                this.classList.remove('border-transparent', 'text-gray-500');
-
+                // Re-render tabs and content to reflect the new active tab
+                renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
             });
         });
@@ -272,7 +265,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderLiteratureResults(papers) {
         if (!papers || papers.length === 0) {
-            literatureResultsContainer.innerHTML = '<p class="text-center text-gray-400">No relevant papers found.</p>';
+            literatureResultsContainer.innerHTML = '<p class="text-center text-gray-400">No relevant papers found for your query in chemistry-related categories.</p>';
             literatureResultsCount.textContent = 'Literature Results (0 papers found)';
             return;
         }
@@ -295,7 +288,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
                         </div>
                         <div class="flex items-center space-x-2 flex-shrink-0 ml-4">
-                            <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.impact}</span>
+                            <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.primary_category}</span>
                         </div>
                     </div>
                     <div class="text-sm text-gray-300 mb-3">${renderedAbstract}</div>

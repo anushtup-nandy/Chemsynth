@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import pubchempy as pcp  # <<< ADDED: Import pubchempy for CAS/Name lookup
 from aizynthfinder.aizynthfinder import AiZynthFinder
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
@@ -326,10 +327,22 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     logger.error(f"Error processing step {step_index} in route {index}: {e}", exc_info=True)
                     continue
             
-            # LLM Route Evaluation
+            # --- MODIFIED: LLM Route Evaluation with Explicit Yield Context ---
             if route_description_for_eval:
                 try:
-                    eval_prompt = format_prompt("evaluate_synthesis_route", route_description=" -> ".join(route_description_for_eval))
+                    # Create a more detailed description for the LLM to improve its evaluation.
+                    full_description_for_eval = (
+                        f"Overall Predicted Yield: {route_info.get('overall_yield', 0.0):.1f}%. "
+                        f"Individual Steps: {' -> '.join(route_description_for_eval)}"
+                    )
+                    # NOTE: The 'evaluate_synthesis_route' prompt should instruct the LLM to consider yields.
+                    # Example prompt instruction: "Analyze the route's advantages and challenges.
+                    # Pay close attention to the overall yield and the yield of each individual step.
+                    # A low-yield step is a significant challenge, while high-yield steps are advantageous."
+                    eval_prompt = format_prompt(
+                        "evaluate_synthesis_route",
+                        route_description=full_description_for_eval
+                    )
                     if eval_prompt:
                         eval_response = generate_text(eval_prompt, temperature=0.5)
                         if eval_response:
