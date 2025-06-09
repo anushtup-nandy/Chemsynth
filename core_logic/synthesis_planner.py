@@ -2,7 +2,7 @@
 import os
 import json
 import logging
-import pubchempy as pcp  # <<< ADDED: Import pubchempy for CAS/Name lookup
+import pubchempy as pcp
 from aizynthfinder.aizynthfinder import AiZynthFinder
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
@@ -287,6 +287,13 @@ def plan_synthesis_route(target_identifier: str) -> dict:
             except Exception as e:
                 logger.warning(f"Could not extract reactions from route {index}: {e}")
                 continue
+
+            # <<< NEW LOGIC: Calculate an averaged per-step yield as a fallback >>>
+            num_steps = len(reaction_steps)
+            avg_step_yield_fraction = 0.0
+            if num_steps > 0 and route_score > 0:
+                # Calculate geometric mean of the overall score to distribute it among steps
+                avg_step_yield_fraction = route_score**(1 / num_steps)
             
             for step_index, reaction in enumerate(reversed(reaction_steps)):
                 try:
@@ -296,8 +303,16 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     if not reactants_smiles or not product_smiles: 
                         continue
                     
-                    # Prioritize 'plausibility', fall back to 'template_score'
-                    yield_value = reaction.metadata.get('plausibility', reaction.metadata.get('template_score', 0.0)) * 100
+                    # <<< MODIFIED: Robust yield calculation >>>
+                    # First, try to get the specific score from metadata.
+                    yield_fraction = reaction.metadata.get('plausibility', reaction.metadata.get('template_score', 0.0))
+                    
+                    # If metadata score is 0, use the calculated average as a fallback.
+                    if yield_fraction == 0.0 and avg_step_yield_fraction > 0.0:
+                        logger.info(f"Step {step_index+1}: Metadata yield not found. Falling back to averaged yield.")
+                        yield_fraction = avg_step_yield_fraction
+                        
+                    yield_value = yield_fraction * 100
                     
                     reaction_smiles_str = f"{'.'.join(reactants_smiles)}>>{product_smiles}"
                     step_details = {"title": "Reaction", "conditions": "N/A", "notes": "N/A"}
@@ -312,7 +327,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     except Exception as e:
                         logger.warning(f"LLM elaboration failed for step {step_index}: {e}")
 
-                    route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.0f}%)")
+                    route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.1f}%)")
 
                     route_info["steps"].append({
                         "step_number": step_index + 1,
@@ -327,7 +342,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     logger.error(f"Error processing step {step_index} in route {index}: {e}", exc_info=True)
                     continue
             
-            # --- MODIFIED: LLM Route Evaluation with Explicit Yield Context ---
+            # --- LLM Route Evaluation with Explicit Yield Context ---
             if route_description_for_eval:
                 try:
                     # Create a more detailed description for the LLM to improve its evaluation.
