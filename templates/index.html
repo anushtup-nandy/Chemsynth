@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.23.0/cytoscape.min.js"></script>
     <!-- Link to our external stylesheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -176,7 +177,13 @@
         
         <!-- Knowledge Graph Section -->
         <div id="knowledge-content" class="tab-content bg-gray-800 rounded-xl p-6 hidden">
-             <h2 class="text-xl font-bold text-center text-gray-500 py-16">Knowledge Graph feature coming soon...</h2>
+             <!-- <<< MODIFIED: Replaced placeholder with a container for the graph >>> -->
+             <h2 class="text-xl font-bold mb-4">Synthesis Knowledge Graph</h2>
+             <p class="text-sm text-gray-400 mb-6">Visual representation of the selected synthesis route, from starting materials to the final product, including vendor relationships.</p>
+             <div id="cy-knowledge-graph" class="w-full h-[600px] border border-gray-700 rounded-lg bg-gray-900">
+                 <!-- Cytoscape.js will render the graph here -->
+                 <p class="text-center text-gray-500 pt-16">Select a synthesis route to generate its knowledge graph.</p>
+             </div>
         </div>
         
         <!-- CTA Section -->

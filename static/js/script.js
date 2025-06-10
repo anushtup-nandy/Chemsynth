@@ -3,6 +3,7 @@ let synthesisRoutesData = [];
 let literatureResults = [];
 let sourcingData = {}; // <<< NEW: Store sourcing/cost analysis results by route ID
 let currentTargetSMILES = ''; // Store the resolved SMILES for the "New Route" feature
+let cy; //Global variable for the Cytoscape instance
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -254,7 +255,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (activeRouteTab) {
                     const activeRouteId = activeRouteTab.dataset.routeId;
                     if (tabName === 'sourcing') renderSourcingInfo(activeRouteId);
-                    else if (tabName === 'cost') renderCostAnalysis(activeRouteId);
+                    if (tabName === 'cost') renderCostAnalysis(activeRouteId);
+                    if (tabName === 'knowledge') renderKnowledgeGraph(activeRouteId);
                 }
             }
         });
@@ -356,12 +358,20 @@ document.addEventListener('DOMContentLoaded', function() {
         let detailsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">';
         if (!steps) return '';
         steps.forEach(step => {
+            // <<< MODIFIED: Add reaction image rendering >>>
+            const imageHtml = step.reaction_image_url
+                ? `<div class="bg-white rounded-md p-2 mb-4"><img src="${step.reaction_image_url}" alt="Reaction diagram for step ${step.step_number}" class="w-full h-auto"/></div>`
+                : `<div class="bg-gray-800 rounded-md p-2 mb-4 text-center text-xs text-gray-500">Image not available</div>`;
+
             detailsHtml += `
-                <div class="bg-gray-700 rounded-lg p-4">
+                <div class="bg-gray-700 rounded-lg p-4 flex flex-col">
                     <h4 class="font-bold mb-2">Step ${step.step_number}: ${step.title}</h4>
-                    <p class="text-sm text-gray-300 mb-3">${step.reagents_conditions}</p>
-                    <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${step.yield.toFixed(1)}%</div>
-                    <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
+                    ${imageHtml}
+                    <div class="flex-grow">
+                        <p class="text-sm text-gray-300 mb-3">${step.reagents_conditions}</p>
+                        <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${step.yield.toFixed(1)}%</div>
+                        <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
+                    </div>
                 </div>`;
         });
         detailsHtml += '</div>';
@@ -525,6 +535,89 @@ document.addEventListener('DOMContentLoaded', function() {
                     <tbody class="text-sm">${tableRows}</tbody>
                 </table>
             </div>`;
+    }
+    
+    function renderKnowledgeGraph(routeId) {
+        const route = synthesisRoutesData.find(r => r.id === routeId);
+        const sourcing = sourcingData[routeId];
+        const container = document.getElementById('cy-knowledge-graph');
+
+        if (!route || !sourcing) {
+            container.innerHTML = '<p class="text-center text-gray-500 pt-16">Sourcing and route data not yet available. Please wait for analysis to complete.</p>';
+            return;
+        }
+        container.innerHTML = ''; // Clear any placeholders
+
+        // 1. Define Nodes
+        let nodes = [];
+        // Add final product node
+        const finalProduct = route.steps[route.steps.length - 1].product;
+        nodes.push({ data: { id: finalProduct.smiles, label: finalProduct.formula, type: 'product' } });
+
+        // Add intermediate and reactant nodes
+        let startingMaterials = new Set(Object.keys(sourcing.sourcing_details || {}));
+        route.steps.forEach(step => {
+            step.reactants.forEach(reactant => {
+                const type = startingMaterials.has(reactant.smiles) ? 'start' : 'intermediate';
+                nodes.push({ data: { id: reactant.smiles, label: reactant.formula, type: type } });
+            });
+            // Add intermediate product nodes (if not the final one)
+            if (step.product.smiles !== finalProduct.smiles) {
+                nodes.push({ data: { id: step.product.smiles, label: step.product.formula, type: 'intermediate' } });
+            }
+        });
+        
+        // Add vendor nodes
+        for (const smiles in sourcing.sourcing_details) {
+            const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
+            if (cheapest) {
+                nodes.push({ data: { id: cheapest.vendor, label: cheapest.vendor, type: 'vendor' } });
+            }
+        }
+        // Deduplicate nodes by ID
+        nodes = Array.from(new Map(nodes.map(item => [item.data.id, item])).values());
+
+        // 2. Define Edges
+        let edges = [];
+        // Reaction edges
+        route.steps.forEach((step, i) => {
+            const reactionNodeId = `reaction_${route.id}_${i}`;
+            nodes.push({ data: { id: reactionNodeId, label: `Step ${step.step_number}`, type: 'reaction' } });
+            step.reactants.forEach(reactant => {
+                edges.push({ data: { source: reactant.smiles, target: reactionNodeId } });
+            });
+            edges.push({ data: { source: reactionNodeId, target: step.product.smiles } });
+        });
+
+        // Sourcing edges
+        for (const smiles in sourcing.sourcing_details) {
+            const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
+            if (cheapest) {
+                edges.push({ data: { source: smiles, target: cheapest.vendor, type: 'supplier' } });
+            }
+        }
+
+        // 3. Initialize Cytoscape
+        cy = cytoscape({
+            container: container,
+            elements: { nodes, edges },
+            style: [
+                { selector: 'node', style: { 'label': 'data(label)', 'color': '#CBD5E0', 'font-size': '12px', 'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': '5px' } },
+                { selector: 'edge', style: { 'width': 2, 'line-color': '#4A5568', 'target-arrow-color': '#4A5568', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
+                { selector: 'node[type="product"]', style: { 'background-color': '#3B82F6', 'shape': 'diamond', 'width': 60, 'height': 60 } },
+                { selector: 'node[type="start"]', style: { 'background-color': '#10B981', 'shape': 'ellipse' } },
+                { selector: 'node[type="intermediate"]', style: { 'background-color': '#6366F1', 'shape': 'ellipse' } },
+                { selector: 'node[type="vendor"]', style: { 'background-color': '#F59E0B', 'shape': 'round-rectangle', 'label': 'data(label)' } },
+                { selector: 'node[type="reaction"]', style: { 'background-color': '#9CA3AF', 'shape': 'rectangle', 'width': 30, 'height': 30 } },
+                { selector: 'edge[type="supplier"]', style: { 'line-style': 'dashed', 'line-color': '#F59E0B' } },
+            ],
+            layout: {
+                name: 'breadthfirst',
+                grid: true,
+                spacingFactor: 1.2,
+                roots: Array.from(startingMaterials) // Layout starts from the starting materials
+            }
+        });
     }
     
     function formatCurrency(value) {

@@ -263,6 +263,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
         
         for index, route in enumerate(sorted_routes[:3]):
             route_score = get_route_score(route)
+            route_id = f"route_{chr(97 + index)}"
             logger.info(f"Processing route {index + 1} with score {route_score}")
             route_info = { 
                 "id": f"route_{chr(97 + index)}", 
@@ -318,6 +319,9 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     reaction_smiles_str = f"{'.'.join(reactants_smiles)}>>{product_smiles}"
                     step_details = {"title": "Reaction", "conditions": "N/A", "notes": "N/A"}
                     
+                    step_id = f"{route_id}_step_{step_index + 1}"
+                    image_url = generate_reaction_image(reaction_smiles_str, step_id)
+
                     try:
                         elaboration_prompt = format_prompt("elaborate_synthesis_step", reaction_smiles=reaction_smiles_str)
                         if elaboration_prompt:
@@ -337,7 +341,8 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                         "reagents_conditions": step_details.get("conditions", "Not specified"),
                         "source_notes": step_details.get("notes", "No specific notes available."),
                         "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
-                        "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles]
+                        "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
+                        "reaction_image_url": image_url 
                     })
                 except Exception as e:
                     logger.error(f"Error processing step {step_index} in route {index}: {e}", exc_info=True)

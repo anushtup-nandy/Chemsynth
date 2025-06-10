@@ -19,11 +19,11 @@ def get_rxn_mapper():
     global _rxn_mapper
     if _rxn_mapper is None:
         try:
-            print("Initializing RXNMapper... (this may take a moment)")
+            print("Initializing RXNMapper... (this may take a moment on first run)")
             _rxn_mapper = RXNMapper()
             print("RXNMapper initialized.")
         except Exception as e:
-            print(f"Failed to initialize RXNMapper: {e}")
+            print(f"Failed to initialize RXNMapper: {e}. Reaction images may not have atom mapping.")
     return _rxn_mapper
 
 def map_reaction(reaction_smiles: str) -> str:
@@ -47,29 +47,44 @@ def map_reaction(reaction_smiles: str) -> str:
         print(f"Error during reaction mapping for '{reaction_smiles}': {e}")
         return reaction_smiles
 
-def generate_reaction_image(mapped_reaction_smiles: str, step_id: str) -> str | None:
+def generate_reaction_image(reaction_smiles: str, step_id: str) -> str | None:
     """
-    Generates a PNG image of the reaction and saves it.
+    Generates an SVG image of the reaction, saves it, and returns its web path.
+    This function now includes the mapping step.
 
     Args:
-        mapped_reaction_smiles: The atom-mapped reaction SMILES.
+        reaction_smiles: The UNMAPPED reaction SMILES.
         step_id: A unique identifier for the step (e.g., "route_a_step_1").
 
     Returns:
         The web-accessible path to the generated image, or None on failure.
     """
     try:
+        # First, get the atom-mapped reaction SMILES
+        mapped_reaction_smiles = map_reaction(reaction_smiles)
+
         rxn = Chem.rdChemReactions.ReactionFromSmarts(mapped_reaction_smiles, useSmiles=True)
         if not rxn:
+            # Fallback for complex reactions RDKit can't draw from SMARTS
+            print(f"Warning: Could not create reaction object for {step_id}. Skipping image.")
             return None
 
-        # Drawing options
-        d2d = rdMolDraw2D.MolDraw2DSVG(450, 150)
+        # Drawing options for a clean SVG
+        d2d = rdMolDraw2D.MolDraw2DSVG(500, 180) # Increased size slightly
         dopts = d2d.drawOptions()
-        dopts.useBWAtomPalette()
+        # Use a color-blind friendly palette for atom highlighting
+        dopts.setHighlightColour((0.2, 0.6, 0.8, 0.8)) # A nice blue
         dopts.atomHighlightsAreCircles = True
+        dopts.fillHighlights = True
         
-        d2d.DrawReaction(rxn)
+        # Highlight the atoms based on the mapping
+        highlight_atoms = []
+        for i in range(rxn.GetNumReactantTemplates()):
+            mol = rxn.GetReactantTemplate(i)
+            highlight_atoms.append([at.GetIdx() for at in mol.GetAtoms() if at.GetAtomMapNum() > 0])
+        
+        d2d.DrawReaction(rxn, highlightByReactant=True, highlightColorsReactants=[(0.2, 0.6, 0.8)])
+        
         d2d.FinishDrawing()
         svg = d2d.GetDrawingText()
 
@@ -83,5 +98,5 @@ def generate_reaction_image(mapped_reaction_smiles: str, step_id: str) -> str | 
         return f"/static/reaction_images/{filename}"
 
     except Exception as e:
-        print(f"Error generating reaction image: {e}")
+        print(f"Error generating reaction image for step {step_id}: {e}")
         return None
