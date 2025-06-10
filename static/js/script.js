@@ -1,6 +1,7 @@
 // Global variables
 let synthesisRoutesData = [];
 let literatureResults = [];
+let sourcingData = {}; // <<< NEW: Store sourcing/cost analysis results by route ID
 let currentTargetSMILES = ''; // Store the resolved SMILES for the "New Route" feature
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -15,6 +16,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const literatureSortSelect = document.getElementById('literature-sort-select');
     
     const synthesisContent = document.getElementById('synthesis-content');
+    const sourcingContent = document.getElementById('sourcing-content');
+    const costContent = document.getElementById('cost-content');
     const routeTabsContainer = document.getElementById('synthesis-route-tabs-container');
     const routeContentContainer = document.getElementById('synthesis-route-content-container');
     const newRouteButton = document.getElementById('new-route-btn');
@@ -45,19 +48,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         updateProgress(0, true); // Reset and show loading
         
-        // --- MODIFIED: Resolve identifier before searching ---
         try {
             const resolvedData = await resolveIdentifier(identifier);
             if (resolvedData) {
-                // Use the resolved name for literature search and the original identifier for synthesis planning
                 const literatureQuery = (resolvedData.name + ' ' + keywords).trim();
                 fetchLiterature(literatureQuery);
-                fetchSynthesisPlan(identifier); // Synthesis planner can handle raw identifier
+                fetchSynthesisPlan(identifier); 
                 document.getElementById('project-target-molecule-name').textContent = `Target: ${resolvedData.name}`;
+                document.getElementById('project-target-molecule-formula').textContent = resolvedData.smiles;
             }
         } catch (error) {
             alert(error.message);
-            updateProgress(0); // Revert progress on failure
+            updateProgress(0); 
         }
     }
 
@@ -98,19 +100,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleSortLiterature() {
         const sortBy = literatureSortSelect.value;
-        let sortedResults = [...literatureResults]; // Create a copy
+        let sortedResults = [...literatureResults];
 
         if (sortBy === 'date') {
             sortedResults.sort((a, b) => new Date(b.published) - new Date(a.published));
         } else if (sortBy === 'citations') {
-            // NOTE: Using 'entry_id' version as a proxy for citations, as arXiv API lacks this.
             sortedResults.sort((a, b) => {
                 const versionA = parseInt(a.entry_id.slice(-1)) || 0;
                 const versionB = parseInt(b.entry_id.slice(-1)) || 0;
                 return versionB - versionA;
             });
         }
-        // 'relevance' is the default from the API, so we just use the original array
         else {
              sortedResults = [...literatureResults];
         }
@@ -121,6 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function addNewRouteToDisplay(newRoute) {
         newRoute.id = newRoute.id || `route_hypothetical_${synthesisRoutesData.length}`;
         synthesisRoutesData.push(newRoute);
+        fetchSourcingAndCost([newRoute]); // Fetch analysis for the new route
         renderRouteTabs(synthesisRoutesData, newRoute.id);
         renderSingleRoute(newRoute);
     }
@@ -162,14 +163,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
                 renderSingleRoute(synthesisRoutesData[0]);
                 updateProgress(2); // Synthesis complete
+                fetchSourcingAndCost(synthesisRoutesData); // <<< NEW: Fetch analysis after routes are found
             } else {
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
-                 updateProgress(1); // Only literature was successful
+                updateProgress(1);
             }
         } catch (error) {
             console.error('Error fetching synthesis plan:', error);
             routeContentContainer.innerHTML = `<div class="text-center py-8"><p class="text-red-400 mb-2">Failed to plan synthesis.</p><p class="text-gray-500 text-sm">${error.message}</p></div>`;
-            updateProgress(1); // Only literature was successful
+            updateProgress(1);
         }
     }
 
@@ -187,15 +189,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            literatureResults = data.papers || []; // Store results for sorting
+            literatureResults = data.papers || [];
             renderLiteratureResults(literatureResults);
-            updateProgress(1); // Literature complete
+            updateProgress(1);
         } catch (error) {
             console.error('Error fetching literature results:', error);
             literatureResultsContainer.innerHTML = `<p class="text-center text-red-400">Failed to load literature: ${error.message}</p>`;
             literatureResultsCount.textContent = 'Literature Results (Error)';
-            updateProgress(0); // Revert on failure
+            updateProgress(0);
         }
+    }
+
+    // <<< NEW FUNCTION: Fetches sourcing and cost analysis for routes >>>
+    async function fetchSourcingAndCost(routes) {
+        updateProgress(3, true); // Sourcing step is loading
+        const analysisPromises = routes.map(route =>
+            fetch('/api/analyze_sourcing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ route_steps: route.steps, target_amount_g: 1.0 })
+            })
+            .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch analysis'))
+            .then(data => ({ routeId: route.id, analysis: data }))
+            .catch(error => ({ routeId: route.id, error }))
+        );
+
+        const results = await Promise.all(analysisPromises);
+        results.forEach(result => {
+            if (result.analysis) {
+                sourcingData[result.routeId] = result.analysis;
+            } else {
+                sourcingData[result.routeId] = { error: "Failed to load analysis for this route." };
+            }
+        });
+        
+        updateProgress(4); // Sourcing & Costing complete
     }
     
     // --- UI Control and Rendering ---
@@ -207,7 +235,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const tabName = clickedTab.dataset.tab;
 
-            // Update tab visual state
             document.querySelectorAll('.tab-link').forEach(tab => {
                 tab.classList.remove('border-blue-500', 'text-blue-500');
                 tab.classList.add('border-transparent', 'text-gray-500');
@@ -215,11 +242,21 @@ document.addEventListener('DOMContentLoaded', function() {
             clickedTab.classList.add('border-blue-500', 'text-blue-500');
             clickedTab.classList.remove('border-transparent', 'text-gray-500');
 
-            // Show/hide content
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.add('hidden');
             });
-            document.getElementById(`${tabName}-content`).classList.remove('hidden');
+            const activeContent = document.getElementById(`${tabName}-content`);
+            activeContent.classList.remove('hidden');
+
+            // <<< NEW: Render content for sourcing/cost tabs when they are selected >>>
+            if (tabName === 'sourcing' || tabName === 'cost') {
+                const activeRouteTab = document.querySelector('.route-tab.border-blue-500');
+                if (activeRouteTab) {
+                    const activeRouteId = activeRouteTab.dataset.routeId;
+                    if (tabName === 'sourcing') renderSourcingInfo(activeRouteId);
+                    else if (tabName === 'cost') renderCostAnalysis(activeRouteId);
+                }
+            }
         });
     }
     
@@ -230,11 +267,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let stepsHtml = '';
         stages.forEach((name, index) => {
-            let statusClass = 'text-gray-500'; // Pending
+            let statusClass = 'text-gray-500'; 
             if (index < stage) {
-                statusClass = 'text-green-400'; // Complete
+                statusClass = 'text-green-400';
             } else if (index === stage) {
-                statusClass = isLoading ? 'text-blue-400 animate-pulse' : 'text-blue-400'; // Active
+                statusClass = isLoading ? 'text-blue-400 animate-pulse' : 'text-blue-400';
             }
             stepsHtml += `<span class="${statusClass}">${name}</span>`;
         });
@@ -261,6 +298,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const routeData = synthesisRoutesData.find(r => r.id === routeId);
                 renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
+
+                // <<< NEW: Update sourcing/cost view if those tabs are active >>>
+                const activeMainTab = document.querySelector('#main-tabs .tab-link.border-blue-500');
+                if (activeMainTab) {
+                    const tabName = activeMainTab.dataset.tab;
+                    if (tabName === 'sourcing') renderSourcingInfo(routeId);
+                    if (tabName === 'cost') renderCostAnalysis(routeId);
+                }
             });
         });
     }
@@ -275,7 +320,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderRouteVisualization(route) {
-        // --- MODIFIED: Changed justify-center to justify-start for scrolling ---
         let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
         if (!route.steps || route.steps.length === 0) return '';
         
@@ -287,8 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
                     <div class="font-bold">${reactantNames}</div>
                 </div>
-            </div>
-        `;
+            </div>`;
 
         route.steps.forEach(step => {
             const isFinalProduct = step.step_number === route.steps.length;
@@ -303,8 +346,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="font-bold ${textColor}">${titleText}</div>
                         <div class="text-xs text-gray-400 mt-1">${step.product.formula}</div>
                     </div>
-                </div>
-            `;
+                </div>`;
         });
         vizHtml += '</div></div>';
         return vizHtml;
@@ -320,8 +362,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p class="text-sm text-gray-300 mb-3">${step.reagents_conditions}</p>
                     <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${step.yield.toFixed(1)}%</div>
                     <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
-                </div>
-            `;
+                </div>`;
         });
         detailsHtml += '</div>';
         return detailsHtml;
@@ -344,8 +385,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <ul class="text-sm text-gray-400 space-y-2">${challenges || '<li>N/A</li>'}</ul>
                     </div>
                 </div>
-            </div>
-        `;
+            </div>`;
     }
 
     function renderLiteratureResults(papers) {
@@ -373,15 +413,121 @@ document.addEventListener('DOMContentLoaded', function() {
                             <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
                         </div>
                         <div class="flex items-center space-x-2 flex-shrink-0 ml-4">
-                            <!-- MODIFIED: Added fallback for robust display -->
                             <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.impact || 'N/A'}</span>
                         </div>
                     </div>
                     <div class="text-sm text-gray-300 mb-3">${renderedAbstract}</div>
                     <div class="flex flex-wrap gap-2">${keywordsHtml}</div>
-                </div>
-            `;
+                </div>`;
         });
         literatureResultsContainer.innerHTML = html;
+    }
+
+    // <<< NEW RENDER FUNCTIONS FOR SOURCING AND COST >>>
+    function renderSourcingInfo(routeId) {
+        const data = sourcingData[routeId];
+        if (!data) {
+            sourcingContent.innerHTML = '<p class="text-center text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i>Loading sourcing data...</p>';
+            return;
+        }
+        if (data.error) {
+            sourcingContent.innerHTML = `<p class="text-center text-red-400">${data.error}</p>`;
+            return;
+        }
+
+        let tableRows = '';
+        const details = data.sourcing_details || {};
+        for (const smiles in details) {
+            const reagent = details[smiles];
+            const cheapest = reagent.cheapest_option;
+            const supplierInfo = cheapest 
+                ? `${cheapest.vendor} (${formatCurrency(cheapest.price_per_g)}/g)`
+                : '<span class="text-yellow-400">Not Found</span>';
+
+            tableRows += `
+                <tr class="border-b border-gray-700">
+                    <td class="p-4">${reagent.formula}</td>
+                    <td class="p-4 font-mono text-xs">${smiles}</td>
+                    <td class="p-4">${(reagent.required_amount_g || 0).toFixed(3)} g</td>
+                    <td class="p-4">${supplierInfo}</td>
+                    <td class="p-4">
+                        <span class="text-sm bg-gray-600 text-gray-300 px-2 py-1 rounded">${reagent.suppliers.length} available</span>
+                    </td>
+                </tr>`;
+        }
+
+        sourcingContent.innerHTML = `
+            <h2 class="text-xl font-bold mb-4">Material Sourcing for Starting Materials</h2>
+            <p class="text-sm text-gray-400 mb-6">${data.assumptions || ''}</p>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
+                        <tr>
+                            <th class="p-4">Reagent</th>
+                            <th class="p-4">SMILES</th>
+                            <th class="p-4">Amount Required</th>
+                            <th class="p-4">Cheapest Supplier</th>
+                            <th class="p-4">Total Suppliers</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-sm">${tableRows}</tbody>
+                </table>
+            </div>`;
+    }
+
+    function renderCostAnalysis(routeId) {
+        const data = sourcingData[routeId];
+        if (!data) {
+            costContent.innerHTML = '<p class="text-center text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i>Loading cost data...</p>';
+            return;
+        }
+        if (data.error) {
+            costContent.innerHTML = `<p class="text-center text-red-400">${data.error}</p>`;
+            return;
+        }
+
+        let tableRows = '';
+        const details = data.sourcing_details || {};
+        for (const smiles in details) {
+            const reagent = details[smiles];
+            tableRows += `
+                <tr class="border-b border-gray-700">
+                    <td class="p-4">${reagent.formula}</td>
+                    <td class="p-4">${(reagent.required_amount_g || 0).toFixed(3)} g</td>
+                    <td class="p-4">${formatCurrency(reagent.cheapest_option?.price_per_g || 0)}</td>
+                    <td class="p-4 font-bold">${formatCurrency(reagent.estimated_cost || 0)}</td>
+                </tr>`;
+        }
+
+        costContent.innerHTML = `
+            <h2 class="text-xl font-bold mb-6">Estimated Cost Analysis</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-gray-700 rounded-lg p-6 text-center">
+                    <h3 class="text-sm font-medium text-gray-400 uppercase">Total Estimated Cost</h3>
+                    <p class="text-4xl font-bold mt-2 gradient-text-blue">${formatCurrency(data.total_cost || 0)}</p>
+                </div>
+                 <div class="md:col-span-2 bg-gray-700 rounded-lg p-6">
+                    <h3 class="text-sm font-medium text-gray-400 uppercase mb-3">Assumptions</h3>
+                    <p class="text-sm text-gray-300">${data.assumptions || ''}</p>
+                </div>
+            </div>
+            <h3 class="text-lg font-bold mb-4">Cost Breakdown by Reagent</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                     <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
+                        <tr>
+                            <th class="p-4">Reagent</th>
+                            <th class="p-4">Amount Required</th>
+                            <th class="p-4">Cost per Gram</th>
+                            <th class="p-4">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-sm">${tableRows}</tbody>
+                </table>
+            </div>`;
+    }
+    
+    function formatCurrency(value) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
     }
 });

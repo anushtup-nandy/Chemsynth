@@ -3,6 +3,7 @@ from flask import Flask, render_template, request, jsonify
 from core_logic.literature_analysis import perform_literature_search
 # MODIFIED imports
 from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route, resolve_molecule_identifier
+from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing # <<< NEW IMPORT
 
 # Initialize Flask App
 app = Flask(__name__)
@@ -14,7 +15,7 @@ def index():
 
 # --- API Endpoints ---
 
-# --- NEW UTILITY ENDPOINT ---
+# --- UTILITY ENDPOINT ---
 @app.route('/api/resolve_identifier', methods=['POST'])
 def api_resolve_identifier():
     """
@@ -44,7 +45,6 @@ def api_resolve_identifier():
 
 @app.route('/api/literature_search', methods=['POST'])
 def api_literature_search():
-    # ... (no changes here)
     data = request.json
     search_query = data.get('query')
     max_results = data.get('max_results', 5)
@@ -63,24 +63,43 @@ def api_plan_synthesis():
     API endpoint for Synthesis Design. Accepts a molecule identifier (SMILES, Name, CAS).
     """
     data = request.json
-    # RENAMED for clarity
     target_identifier = data.get('identifier') 
 
     if not target_identifier:
         return jsonify({"error": "Target molecule identifier is required."}), 400
 
     try:
-        # MODIFIED: Pass the raw identifier to the backend function
         results = plan_synthesis_route(target_identifier)
         if "error" in results:
-            # Pass through specific errors (e.g., "Could not resolve identifier")
             return jsonify(results), 400 
         return jsonify(results)
     except Exception as e:
         print(f"An unhandled error occurred during synthesis planning: {e}")
         return jsonify({"error": "An internal server error occurred."}), 500
 
-# --- NEW API ENDPOINT ---
+# --- NEW SOURCING & COST ANALYSIS ENDPOINT ---
+@app.route('/api/analyze_sourcing', methods=['POST'])
+def api_analyze_sourcing():
+    """
+    API endpoint for Sourcing and Cost analysis.
+    Accepts synthesis route steps and a target amount.
+    """
+    data = request.json
+    route_steps = data.get('route_steps')
+    target_amount_g = float(data.get('target_amount_g', 1.0))
+
+    if not route_steps:
+        return jsonify({"error": "Route steps are required for analysis."}), 400
+
+    try:
+        # This function comes from core_logic/sourcing_analysis.py
+        analysis_results = analyze_route_cost_and_sourcing(route_steps, target_amount_g)
+        return jsonify(analysis_results)
+    except Exception as e:
+        print(f"An unhandled error occurred during sourcing analysis: {e}")
+        return jsonify({"error": "An internal server error occurred during analysis."}), 500
+
+
 @app.route('/api/generate_new_route', methods=['POST'])
 def api_generate_new_route():
     """
