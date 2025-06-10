@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const routeTabsContainer = document.getElementById('synthesis-route-tabs-container');
     const routeContentContainer = document.getElementById('synthesis-route-content-container');
     const newRouteButton = document.getElementById('new-route-btn');
+    const knowledgeContent = document.getElementById('knowledge-content');
 
     const progressBar = document.getElementById('project-progress-bar');
     const progressStepsContainer = document.getElementById('project-progress-steps');
@@ -125,6 +126,10 @@ document.addEventListener('DOMContentLoaded', function() {
         fetchSourcingAndCost([newRoute]); // Fetch analysis for the new route
         renderRouteTabs(synthesisRoutesData, newRoute.id);
         renderSingleRoute(newRoute);
+        // If KG tab is active, render the new route's graph
+        if (document.querySelector('#main-tabs .tab-link[data-tab="knowledge"].border-blue-500')) {
+            renderKnowledgeGraph(newRoute.id);
+        }
     }
 
     // --- API Fetching Functions ---
@@ -201,7 +206,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // <<< NEW FUNCTION: Fetches sourcing and cost analysis for routes >>>
     async function fetchSourcingAndCost(routes) {
         updateProgress(3, true); // Sourcing step is loading
         const analysisPromises = routes.map(route =>
@@ -249,13 +253,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const activeContent = document.getElementById(`${tabName}-content`);
             activeContent.classList.remove('hidden');
 
-            // <<< NEW: Render content for sourcing/cost tabs when they are selected >>>
-            if (tabName === 'sourcing' || tabName === 'cost') {
+            // <<< FIX #1: The condition must include 'knowledge' to trigger rendering.
+            if (tabName === 'sourcing' || tabName === 'cost' || tabName === 'knowledge') {
                 const activeRouteTab = document.querySelector('.route-tab.border-blue-500');
                 if (activeRouteTab) {
                     const activeRouteId = activeRouteTab.dataset.routeId;
                     if (tabName === 'sourcing') renderSourcingInfo(activeRouteId);
                     if (tabName === 'cost') renderCostAnalysis(activeRouteId);
+                    // This now gets called correctly when the 'knowledge' tab is clicked.
                     if (tabName === 'knowledge') renderKnowledgeGraph(activeRouteId);
                 }
             }
@@ -301,12 +306,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
 
-                // <<< NEW: Update sourcing/cost view if those tabs are active >>>
+                // Update view if the corresponding main tab is active
                 const activeMainTab = document.querySelector('#main-tabs .tab-link.border-blue-500');
                 if (activeMainTab) {
                     const tabName = activeMainTab.dataset.tab;
                     if (tabName === 'sourcing') renderSourcingInfo(routeId);
                     if (tabName === 'cost') renderCostAnalysis(routeId);
+                    // <<< FIX #2: Add the missing check here to update the graph when switching routes.
+                    if (tabName === 'knowledge') renderKnowledgeGraph(routeId);
                 }
             });
         });
@@ -358,7 +365,6 @@ document.addEventListener('DOMContentLoaded', function() {
         let detailsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">';
         if (!steps) return '';
         steps.forEach(step => {
-            // <<< MODIFIED: Add reaction image rendering >>>
             const imageHtml = step.reaction_image_url
                 ? `<div class="bg-white rounded-md p-2 mb-4"><img src="${step.reaction_image_url}" alt="Reaction diagram for step ${step.step_number}" class="w-full h-auto"/></div>`
                 : `<div class="bg-gray-800 rounded-md p-2 mb-4 text-center text-xs text-gray-500">Image not available</div>`;
@@ -433,7 +439,6 @@ document.addEventListener('DOMContentLoaded', function() {
         literatureResultsContainer.innerHTML = html;
     }
 
-    // <<< NEW RENDER FUNCTIONS FOR SOURCING AND COST >>>
     function renderSourcingInfo(routeId) {
         const data = sourcingData[routeId];
         if (!data) {
@@ -618,6 +623,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 roots: Array.from(startingMaterials) // Layout starts from the starting materials
             }
         });
+        updateProgress(5); 
     }
     
     function formatCurrency(value) {

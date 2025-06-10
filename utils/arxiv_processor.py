@@ -8,8 +8,46 @@ from .prompt_loader import format_prompt, get_prompt_template
 # This list includes chemistry, materials science, condensed matter physics,
 # and relevant sub-categories of quantitative biology and physics.
 RELEVANT_ARXIV_CATEGORIES = [
-    'chem', 'cond-mat.mtrl-sci', 'cond-mat.soft', 'physics.chem-ph',
-    'physics.bio-ph', 'q-bio.BM', 'q-bio.QM'
+    # Chemistry (Primary - All chemistry papers)
+    'chem-ph',  # Chemical Physics
+    
+    # Physics - Molecular & Chemical Systems
+    'physics.chem-ph',    # Chemical Physics
+    'physics.bio-ph',     # Biological Physics (drug-target interactions)
+    'physics.comp-ph',    # Computational Physics (molecular dynamics, DFT)
+    'physics.data-an',    # Data Analysis (QSAR, chemical data mining)
+    
+    # Condensed Matter - Materials & Molecular Systems
+    'cond-mat.mtrl-sci',  # Materials Science (drug formulation, crystallography)
+    'cond-mat.soft',      # Soft Condensed Matter (drug delivery systems)
+    'cond-mat.dis-nn',    # Disordered Systems (amorphous drug forms)
+    'cond-mat.stat-mech', # Statistical Mechanics (molecular interactions)
+    
+    # Quantitative Biology - Drug Discovery Focus
+    'q-bio.BM',    # Biomolecules (protein-drug interactions, molecular recognition)
+    'q-bio.MN',    # Molecular Networks (drug pathways, systems pharmacology)
+    'q-bio.QM',    # Quantitative Methods (pharmacokinetics, ADMET modeling)
+    'q-bio.SC',    # Subcellular Processes (drug mechanisms, cellular targets)
+    'q-bio.TO',    # Tissues and Organs (drug distribution, tissue-specific effects)
+    'q-bio.CB',    # Cell Behavior (cytotoxicity, drug resistance)
+    
+    # Computer Science - AI/ML for Drug Discovery
+    'cs.LG',       # Machine Learning (drug discovery AI, molecular property prediction)
+    'cs.AI',       # Artificial Intelligence (retrosynthesis planning, drug design)
+    'cs.CE',       # Computational Engineering (molecular simulation, cheminformatics)
+    'cs.CV',       # Computer Vision (molecular image analysis, structural recognition)
+    'cs.IR',       # Information Retrieval (chemical database mining, literature analysis)
+    
+    # Statistics - Chemical Data Analysis
+    'stat.ML',     # Machine Learning (QSAR, molecular descriptor analysis)
+    'stat.AP',     # Applications (clinical trial statistics, pharmacovigilance)
+    'stat.ME',     # Methodology (experimental design, statistical modeling)
+    
+    # Mathematics - Molecular Modeling
+    'math.OC',     # Optimization and Control (molecular optimization, synthesis planning)
+    'math.NA',     # Numerical Analysis (quantum chemistry calculations)
+    'math.PR',     # Probability (stochastic models in drug discovery)
+    'math.DS',     # Dynamical Systems (reaction kinetics, pharmacokinetic modeling)
 ]
 
 def search_arxiv(
