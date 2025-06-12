@@ -8,46 +8,127 @@ from .prompt_loader import format_prompt, get_prompt_template
 # This list includes chemistry, materials science, condensed matter physics,
 # and relevant sub-categories of quantitative biology and physics.
 RELEVANT_ARXIV_CATEGORIES = [
-    # Chemistry (Primary - All chemistry papers)
-    'chem-ph',  # Chemical Physics
+    # ==================== CHEMISTRY (All Categories) ====================
+    'chem-ph',  # Chemical Physics - PRIMARY CATEGORY for chemistry
     
-    # Physics - Molecular & Chemical Systems
+    # ==================== PHYSICS - Chemical & Molecular Systems ====================
     'physics.chem-ph',    # Chemical Physics
-    'physics.bio-ph',     # Biological Physics (drug-target interactions)
-    'physics.comp-ph',    # Computational Physics (molecular dynamics, DFT)
-    'physics.data-an',    # Data Analysis (QSAR, chemical data mining)
+    'physics.bio-ph',     # Biological Physics (biochemical synthesis, molecular interactions)
+    'physics.comp-ph',    # Computational Physics (DFT, molecular dynamics, quantum chemistry)
+    'physics.data-an',    # Data Analysis (spectroscopy, chemical data analysis)
+    'physics.atom-ph',    # Atomic Physics (atomic-level chemical processes)
+    'physics.optics',     # Optics (photochemistry, laser-assisted synthesis)
+    'physics.plasm-ph',   # Plasma Physics (plasma-enhanced synthesis)
+    'physics.app-ph',     # Applied Physics (applied chemical processes)
+    'physics.flu-dyn',    # Fluid Dynamics (chemical reactions in flow systems)
+    'physics.class-ph',   # Classical Physics (thermodynamics of chemical systems)
     
-    # Condensed Matter - Materials & Molecular Systems
-    'cond-mat.mtrl-sci',  # Materials Science (drug formulation, crystallography)
-    'cond-mat.soft',      # Soft Condensed Matter (drug delivery systems)
-    'cond-mat.dis-nn',    # Disordered Systems (amorphous drug forms)
-    'cond-mat.stat-mech', # Statistical Mechanics (molecular interactions)
+    # ==================== CONDENSED MATTER - Materials & Molecular Systems ====================
+    'cond-mat.mtrl-sci',  # Materials Science (synthesis of new materials)
+    'cond-mat.soft',      # Soft Condensed Matter (polymers, colloids, drug delivery)
+    'cond-mat.mes-hall',  # Mesoscale and Nanoscale Physics (nanoparticle synthesis)
+    'cond-mat.str-el',    # Strongly Correlated Electrons (electronic materials synthesis)
+    'cond-mat.supr-con',  # Superconductivity (superconducting material synthesis)
+    'cond-mat.dis-nn',    # Disordered Systems (amorphous materials, glasses)
+    'cond-mat.stat-mech', # Statistical Mechanics (reaction kinetics, phase transitions)
+    'cond-mat.other',     # Other Condensed Matter (miscellaneous materials research)
     
-    # Quantitative Biology - Drug Discovery Focus
-    'q-bio.BM',    # Biomolecules (protein-drug interactions, molecular recognition)
-    'q-bio.MN',    # Molecular Networks (drug pathways, systems pharmacology)
-    'q-bio.QM',    # Quantitative Methods (pharmacokinetics, ADMET modeling)
-    'q-bio.SC',    # Subcellular Processes (drug mechanisms, cellular targets)
-    'q-bio.TO',    # Tissues and Organs (drug distribution, tissue-specific effects)
-    'q-bio.CB',    # Cell Behavior (cytotoxicity, drug resistance)
+    # ==================== QUANTITATIVE BIOLOGY - Comprehensive Coverage ====================
+    'q-bio.BM',    # Biomolecules (protein synthesis, nucleic acid synthesis)
+    'q-bio.MN',    # Molecular Networks (metabolic pathways, biosynthesis networks)
+    'q-bio.QM',    # Quantitative Methods (pharmacokinetics, systems biology)
+    'q-bio.SC',    # Subcellular Processes (enzymatic synthesis, cellular metabolism)
+    'q-bio.TO',    # Tissues and Organs (tissue engineering, biomedical synthesis)
+    'q-bio.CB',    # Cell Behavior (cell-based synthesis, biotechnology)
+    'q-bio.GN',    # Genomics (genetic engineering, synthetic biology)
+    'q-bio.PE',    # Populations and Evolution (chemical ecology, evolutionary biochemistry)
+    'q-bio.NC',    # Neurons and Cognition (neurotransmitter synthesis, neurochemistry)
+    'q-bio.OT',    # Other Quantitative Biology (interdisciplinary bio-chem research)
     
-    # Computer Science - AI/ML for Drug Discovery
-    'cs.LG',       # Machine Learning (drug discovery AI, molecular property prediction)
-    'cs.AI',       # Artificial Intelligence (retrosynthesis planning, drug design)
-    'cs.CE',       # Computational Engineering (molecular simulation, cheminformatics)
-    'cs.CV',       # Computer Vision (molecular image analysis, structural recognition)
+    # ==================== COMPUTER SCIENCE - AI/ML/Computational Chemistry ====================
+    'cs.LG',       # Machine Learning (ML for synthesis prediction, retrosynthesis)
+    'cs.AI',       # Artificial Intelligence (AI-driven drug discovery, synthesis planning)
+    'cs.CE',       # Computational Engineering (molecular simulation, process optimization)
+    'cs.CV',       # Computer Vision (molecular structure recognition, spectral analysis)
     'cs.IR',       # Information Retrieval (chemical database mining, literature analysis)
+    'cs.DC',       # Distributed Computing (high-throughput virtual screening)
+    'cs.DS',       # Data Structures and Algorithms (graph algorithms for molecules)
+    'cs.ET',       # Emerging Technologies (quantum computing for chemistry)
+    'cs.HC',       # Human-Computer Interaction (chemical informatics interfaces)
+    'cs.IT',       # Information Theory (molecular information processing)
+    'cs.NE',       # Neural and Evolutionary Computing (genetic algorithms for synthesis)
+    'cs.PL',       # Programming Languages (domain-specific languages for chemistry)
+    'cs.RO',       # Robotics (automated synthesis, lab automation)
+    'cs.SC',       # Symbolic Computation (computer algebra for chemistry)
+    'cs.SE',       # Software Engineering (chemical software development)
+    'cs.SY',       # Systems and Control (process control, reaction optimization)
     
-    # Statistics - Chemical Data Analysis
+    # ==================== STATISTICS - Chemical Data & Experimental Design ====================
     'stat.ML',     # Machine Learning (QSAR, molecular descriptor analysis)
-    'stat.AP',     # Applications (clinical trial statistics, pharmacovigilance)
-    'stat.ME',     # Methodology (experimental design, statistical modeling)
+    'stat.AP',     # Applications (experimental design, quality control)
+    'stat.ME',     # Methodology (statistical methods for chemical analysis)
+    'stat.CO',     # Computation (computational statistics for chemistry)
+    'stat.TH',     # Theory (statistical theory relevant to chemical analysis)
+    'stat.OT',     # Other Statistics (interdisciplinary statistical applications)
     
-    # Mathematics - Molecular Modeling
-    'math.OC',     # Optimization and Control (molecular optimization, synthesis planning)
-    'math.NA',     # Numerical Analysis (quantum chemistry calculations)
-    'math.PR',     # Probability (stochastic models in drug discovery)
-    'math.DS',     # Dynamical Systems (reaction kinetics, pharmacokinetic modeling)
+    # ==================== MATHEMATICS - Modeling & Optimization ====================
+    'math.OC',     # Optimization and Control (reaction optimization, process control)
+    'math.NA',     # Numerical Analysis (numerical methods for chemistry)
+    'math.PR',     # Probability (stochastic models, reaction kinetics)
+    'math.DS',     # Dynamical Systems (chemical reaction networks)
+    'math.AP',     # Analysis of PDEs (reaction-diffusion equations)
+    'math.SP',     # Spectral Theory (spectroscopic analysis, quantum mechanics)
+    'math.CA',     # Classical Analysis (mathematical chemistry foundations)
+    'math.DG',     # Differential Geometry (molecular geometry, conformational analysis)
+    'math.CO',     # Combinatorics (chemical graph theory, molecular enumeration)
+    'math.GM',     # General Mathematics (mathematical chemistry)
+    'math.GN',     # General Topology (chemical topology)
+    'math.GT',     # Geometric Topology (molecular topology)
+    'math.MG',     # Metric Geometry (molecular distance geometry)
+    'math.NT',     # Number Theory (applications in crystallography)
+    'math.AG',     # Algebraic Geometry (algebraic methods in chemistry)
+    'math.AT',     # Algebraic Topology (topological data analysis for molecules)
+    'math.CT',     # Category Theory (categorical approaches to chemistry)
+    'math.FA',     # Functional Analysis (quantum chemistry, spectral methods)
+    'math.GR',     # Group Theory (molecular symmetry, crystallography)
+    'math.LO',     # Logic (automated reasoning in chemistry)
+    'math.MP',     # Mathematical Physics (quantum chemistry, statistical mechanics)
+    'math.QA',     # Quantum Algebra (quantum groups in chemistry)
+    'math.RA',     # Rings and Algebras (algebraic structures in chemistry)
+    'math.RT',     # Representation Theory (symmetry in molecular systems)
+    'math.SG',     # Symplectic Geometry (Hamiltonian mechanics in chemistry)
+    'math.ST',     # Statistics Theory (theoretical statistics for chemistry)
+    
+    # ==================== NUCLEAR & HIGH ENERGY PHYSICS (Relevant Subsets) ====================
+    'nucl-ex',     # Nuclear Experiment (radiochemistry, nuclear synthesis)
+    'nucl-th',     # Nuclear Theory (nuclear reaction mechanisms)
+    'hep-ex',      # High Energy Physics - Experiment (particle detection chemistry)
+    'hep-ph',      # High Energy Physics - Phenomenology (fundamental interactions)
+    
+    # ==================== ASTROPHYSICS (Astrochemistry) ====================
+    'astro-ph.EP', # Earth and Planetary Astrophysics (planetary chemistry)
+    'astro-ph.GA', # Astrophysics of Galaxies (interstellar chemistry)
+    'astro-ph.SR', # Solar and Stellar Astrophysics (stellar nucleosynthesis)
+    'astro-ph.IM', # Instrumentation and Methods (astronomical spectroscopy)
+    
+    # ==================== NONLINEAR SCIENCES ====================
+    'nlin.AO',     # Adaptation and Self-Organizing Systems (self-assembly)
+    'nlin.CD',     # Chaotic Dynamics (chaos in chemical reactions)
+    'nlin.PS',     # Pattern Formation (chemical patterns, Turing patterns)
+    
+    # ==================== ECONOMICS (Relevant to Chemical Industry) ====================
+    'econ.GN',     # General Economics (chemical industry economics)
+    
+    # ==================== ELECTRICAL ENGINEERING & SYSTEMS SCIENCE ====================
+    'eess.AS',     # Audio and Speech Processing (chemical acoustic analysis)
+    'eess.IV',     # Image and Video Processing (microscopy, spectral imaging)
+    'eess.SP',     # Signal Processing (chemical signal analysis, NMR processing)
+    'eess.SY',     # Systems and Control (chemical process control)
+    
+    # ==================== ADDITIONAL INTERDISCIPLINARY CATEGORIES ====================
+    # These categories often contain chemical synthesis research
+    'quant-ph',    # Quantum Physics (quantum chemistry, quantum materials)
+    'gr-qc',       # General Relativity (cosmochemistry, extreme conditions)
 ]
 
 def search_arxiv(
