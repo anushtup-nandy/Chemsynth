@@ -46,22 +46,22 @@ RELEVANT_ARXIV_CATEGORIES = [
     'q-bio.OT',    # Other Quantitative Biology (interdisciplinary bio-chem research)
     
     # ==================== COMPUTER SCIENCE - AI/ML/Computational Chemistry ====================
-    'cs.LG',       # Machine Learning (ML for synthesis prediction, retrosynthesis)
-    'cs.AI',       # Artificial Intelligence (AI-driven drug discovery, synthesis planning)
-    'cs.CE',       # Computational Engineering (molecular simulation, process optimization)
-    'cs.CV',       # Computer Vision (molecular structure recognition, spectral analysis)
-    'cs.IR',       # Information Retrieval (chemical database mining, literature analysis)
-    'cs.DC',       # Distributed Computing (high-throughput virtual screening)
-    'cs.DS',       # Data Structures and Algorithms (graph algorithms for molecules)
-    'cs.ET',       # Emerging Technologies (quantum computing for chemistry)
-    'cs.HC',       # Human-Computer Interaction (chemical informatics interfaces)
-    'cs.IT',       # Information Theory (molecular information processing)
-    'cs.NE',       # Neural and Evolutionary Computing (genetic algorithms for synthesis)
-    'cs.PL',       # Programming Languages (domain-specific languages for chemistry)
-    'cs.RO',       # Robotics (automated synthesis, lab automation)
-    'cs.SC',       # Symbolic Computation (computer algebra for chemistry)
-    'cs.SE',       # Software Engineering (chemical software development)
-    'cs.SY',       # Systems and Control (process control, reaction optimization)
+    # 'cs.LG',       # Machine Learning (ML for synthesis prediction, retrosynthesis)
+    # 'cs.AI',       # Artificial Intelligence (AI-driven drug discovery, synthesis planning)
+    # 'cs.CE',       # Computational Engineering (molecular simulation, process optimization)
+    # 'cs.CV',       # Computer Vision (molecular structure recognition, spectral analysis)
+    # 'cs.IR',       # Information Retrieval (chemical database mining, literature analysis)
+    # 'cs.DC',       # Distributed Computing (high-throughput virtual screening)
+    # 'cs.DS',       # Data Structures and Algorithms (graph algorithms for molecules)
+    # 'cs.ET',       # Emerging Technologies (quantum computing for chemistry)
+    # 'cs.HC',       # Human-Computer Interaction (chemical informatics interfaces)
+    # 'cs.IT',       # Information Theory (molecular information processing)
+    # 'cs.NE',       # Neural and Evolutionary Computing (genetic algorithms for synthesis)
+    # 'cs.PL',       # Programming Languages (domain-specific languages for chemistry)
+    # 'cs.RO',       # Robotics (automated synthesis, lab automation)
+    # 'cs.SC',       # Symbolic Computation (computer algebra for chemistry)
+    # 'cs.SE',       # Software Engineering (chemical software development)
+    # 'cs.SY',       # Systems and Control (process control, reaction optimization)
     
     # ==================== STATISTICS - Chemical Data & Experimental Design ====================
     'stat.ML',     # Machine Learning (QSAR, molecular descriptor analysis)
@@ -122,7 +122,7 @@ RELEVANT_ARXIV_CATEGORIES = [
     # ==================== ELECTRICAL ENGINEERING & SYSTEMS SCIENCE ====================
     'eess.AS',     # Audio and Speech Processing (chemical acoustic analysis)
     'eess.IV',     # Image and Video Processing (microscopy, spectral imaging)
-    'eess.SP',     # Signal Processing (chemical signal analysis, NMR processing)
+    'eess.SP',     # Signal Processing (chemical signal analysis, NMR processing)  
     'eess.SY',     # Systems and Control (chemical process control)
     
     # ==================== ADDITIONAL INTERDISCIPLINARY CATEGORIES ====================
