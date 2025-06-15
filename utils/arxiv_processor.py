@@ -4,172 +4,153 @@ from typing import List, Dict, Optional, Any
 from .llm_interface import generate_text
 from .prompt_loader import format_prompt, get_prompt_template
 
-# <<< NEW: Define relevant categories to filter the search >>>
-# This list includes chemistry, materials science, condensed matter physics,
-# and relevant sub-categories of quantitative biology and physics.
-RELEVANT_ARXIV_CATEGORIES = [
-    # ==================== CHEMISTRY (All Categories) ====================
+# utils/arxiv_processor.py - Updated categories section
+
+# More focused categories for chemistry and pharmaceutical research
+CHEMISTRY_FOCUSED_CATEGORIES = [
+    # ==================== PRIMARY CHEMISTRY CATEGORIES ====================
     'chem-ph',  # Chemical Physics - PRIMARY CATEGORY for chemistry
     
-    # ==================== PHYSICS - Chemical & Molecular Systems ====================
+    # ==================== PHYSICS - Chemical & Molecular Systems (Most Relevant) ====================
     'physics.chem-ph',    # Chemical Physics
-    'physics.bio-ph',     # Biological Physics (biochemical synthesis, molecular interactions)
-    'physics.comp-ph',    # Computational Physics (DFT, molecular dynamics, quantum chemistry)
-    'physics.data-an',    # Data Analysis (spectroscopy, chemical data analysis)
-    'physics.atom-ph',    # Atomic Physics (atomic-level chemical processes)
-    'physics.optics',     # Optics (photochemistry, laser-assisted synthesis)
-    'physics.plasm-ph',   # Plasma Physics (plasma-enhanced synthesis)
-    'physics.app-ph',     # Applied Physics (applied chemical processes)
-    'physics.flu-dyn',    # Fluid Dynamics (chemical reactions in flow systems)
-    'physics.class-ph',   # Classical Physics (thermodynamics of chemical systems)
+    'physics.bio-ph',     # Biological Physics (drug interactions, molecular biology)
+    'physics.comp-ph',    # Computational Physics (DFT, molecular dynamics)
+    'physics.data-an',    # Data Analysis (spectroscopy, chemical analysis)
+    'physics.atom-ph',    # Atomic Physics (atomic-level processes)
     
-    # ==================== CONDENSED MATTER - Materials & Molecular Systems ====================
-    'cond-mat.mtrl-sci',  # Materials Science (synthesis of new materials)
-    'cond-mat.soft',      # Soft Condensed Matter (polymers, colloids, drug delivery)
-    'cond-mat.mes-hall',  # Mesoscale and Nanoscale Physics (nanoparticle synthesis)
-    'cond-mat.str-el',    # Strongly Correlated Electrons (electronic materials synthesis)
-    'cond-mat.supr-con',  # Superconductivity (superconducting material synthesis)
-    'cond-mat.dis-nn',    # Disordered Systems (amorphous materials, glasses)
-    'cond-mat.stat-mech', # Statistical Mechanics (reaction kinetics, phase transitions)
-    'cond-mat.other',     # Other Condensed Matter (miscellaneous materials research)
+    # ==================== CONDENSED MATTER - Materials & Drug Delivery ====================
+    'cond-mat.mtrl-sci',  # Materials Science (drug delivery materials, pharmaceutical materials)
+    'cond-mat.soft',      # Soft Condensed Matter (polymers, drug delivery systems)
+    'cond-mat.mes-hall',  # Mesoscale Physics (nanoparticle drug delivery)
+    'cond-mat.stat-mech', # Statistical Mechanics (reaction kinetics)
     
-    # ==================== QUANTITATIVE BIOLOGY - Comprehensive Coverage ====================
-    'q-bio.BM',    # Biomolecules (protein synthesis, nucleic acid synthesis)
-    'q-bio.MN',    # Molecular Networks (metabolic pathways, biosynthesis networks)
-    'q-bio.QM',    # Quantitative Methods (pharmacokinetics, systems biology)
-    'q-bio.SC',    # Subcellular Processes (enzymatic synthesis, cellular metabolism)
-    'q-bio.TO',    # Tissues and Organs (tissue engineering, biomedical synthesis)
-    'q-bio.CB',    # Cell Behavior (cell-based synthesis, biotechnology)
-    'q-bio.GN',    # Genomics (genetic engineering, synthetic biology)
-    'q-bio.PE',    # Populations and Evolution (chemical ecology, evolutionary biochemistry)
-    'q-bio.NC',    # Neurons and Cognition (neurotransmitter synthesis, neurochemistry)
-    'q-bio.OT',    # Other Quantitative Biology (interdisciplinary bio-chem research)
+    # ==================== QUANTITATIVE BIOLOGY - Drug Discovery & Biochemistry ====================
+    'q-bio.BM',    # Biomolecules (drug targets, protein-drug interactions)
+    'q-bio.MN',    # Molecular Networks (metabolic pathways, drug metabolism)
+    'q-bio.QM',    # Quantitative Methods (pharmacokinetics, QSAR)
+    'q-bio.SC',    # Subcellular Processes (drug action mechanisms)
+    'q-bio.TO',    # Tissues and Organs (drug delivery, pharmacology)
+    'q-bio.CB',    # Cell Behavior (drug effects on cells)
     
-    # ==================== COMPUTER SCIENCE - AI/ML/Computational Chemistry ====================
-    # 'cs.LG',       # Machine Learning (ML for synthesis prediction, retrosynthesis)
-    # 'cs.AI',       # Artificial Intelligence (AI-driven drug discovery, synthesis planning)
-    # 'cs.CE',       # Computational Engineering (molecular simulation, process optimization)
-    # 'cs.CV',       # Computer Vision (molecular structure recognition, spectral analysis)
-    # 'cs.IR',       # Information Retrieval (chemical database mining, literature analysis)
-    # 'cs.DC',       # Distributed Computing (high-throughput virtual screening)
-    # 'cs.DS',       # Data Structures and Algorithms (graph algorithms for molecules)
-    # 'cs.ET',       # Emerging Technologies (quantum computing for chemistry)
-    # 'cs.HC',       # Human-Computer Interaction (chemical informatics interfaces)
-    # 'cs.IT',       # Information Theory (molecular information processing)
-    # 'cs.NE',       # Neural and Evolutionary Computing (genetic algorithms for synthesis)
-    # 'cs.PL',       # Programming Languages (domain-specific languages for chemistry)
-    # 'cs.RO',       # Robotics (automated synthesis, lab automation)
-    # 'cs.SC',       # Symbolic Computation (computer algebra for chemistry)
-    # 'cs.SE',       # Software Engineering (chemical software development)
-    # 'cs.SY',       # Systems and Control (process control, reaction optimization)
+    # ==================== STATISTICS & ML - QSAR and Drug Discovery ====================
+    'stat.ML',     # Machine Learning (QSAR, drug discovery ML)
+    'stat.AP',     # Applications (clinical trial analysis, experimental design)
+    'stat.ME',     # Methodology (statistical methods for pharmaceutical research)
     
-    # ==================== STATISTICS - Chemical Data & Experimental Design ====================
-    'stat.ML',     # Machine Learning (QSAR, molecular descriptor analysis)
-    'stat.AP',     # Applications (experimental design, quality control)
-    'stat.ME',     # Methodology (statistical methods for chemical analysis)
-    'stat.CO',     # Computation (computational statistics for chemistry)
-    'stat.TH',     # Theory (statistical theory relevant to chemical analysis)
-    'stat.OT',     # Other Statistics (interdisciplinary statistical applications)
+    # ==================== MATHEMATICS - Modeling (Limited to Most Relevant) ====================
+    'math.OC',     # Optimization (reaction optimization, drug design)
+    'math.NA',     # Numerical Analysis (computational chemistry methods)
+    'math.DS',     # Dynamical Systems (reaction networks, pharmacokinetics)
+]
+
+# Extended categories for broader searches (use when primary search yields few results)
+EXTENDED_CHEMISTRY_CATEGORIES = CHEMISTRY_FOCUSED_CATEGORIES + [
+    # Additional physics
+    'physics.optics',     # Optics (photochemistry, laser applications)
+    'physics.app-ph',     # Applied Physics
+    'physics.flu-dyn',    # Fluid Dynamics (chemical processes)
     
-    # ==================== MATHEMATICS - Modeling & Optimization ====================
-    'math.OC',     # Optimization and Control (reaction optimization, process control)
-    'math.NA',     # Numerical Analysis (numerical methods for chemistry)
-    'math.PR',     # Probability (stochastic models, reaction kinetics)
-    'math.DS',     # Dynamical Systems (chemical reaction networks)
-    'math.AP',     # Analysis of PDEs (reaction-diffusion equations)
-    'math.SP',     # Spectral Theory (spectroscopic analysis, quantum mechanics)
-    'math.CA',     # Classical Analysis (mathematical chemistry foundations)
-    'math.DG',     # Differential Geometry (molecular geometry, conformational analysis)
-    'math.CO',     # Combinatorics (chemical graph theory, molecular enumeration)
-    'math.GM',     # General Mathematics (mathematical chemistry)
-    'math.GN',     # General Topology (chemical topology)
-    'math.GT',     # Geometric Topology (molecular topology)
-    'math.MG',     # Metric Geometry (molecular distance geometry)
-    'math.NT',     # Number Theory (applications in crystallography)
-    'math.AG',     # Algebraic Geometry (algebraic methods in chemistry)
-    'math.AT',     # Algebraic Topology (topological data analysis for molecules)
-    'math.CT',     # Category Theory (categorical approaches to chemistry)
-    'math.FA',     # Functional Analysis (quantum chemistry, spectral methods)
-    'math.GR',     # Group Theory (molecular symmetry, crystallography)
-    'math.LO',     # Logic (automated reasoning in chemistry)
-    'math.MP',     # Mathematical Physics (quantum chemistry, statistical mechanics)
-    'math.QA',     # Quantum Algebra (quantum groups in chemistry)
-    'math.RA',     # Rings and Algebras (algebraic structures in chemistry)
-    'math.RT',     # Representation Theory (symmetry in molecular systems)
-    'math.SG',     # Symplectic Geometry (Hamiltonian mechanics in chemistry)
-    'math.ST',     # Statistics Theory (theoretical statistics for chemistry)
+    # Additional condensed matter
+    'cond-mat.dis-nn',    # Disordered Systems
+    'cond-mat.other',     # Other Condensed Matter
     
-    # ==================== NUCLEAR & HIGH ENERGY PHYSICS (Relevant Subsets) ====================
-    'nucl-ex',     # Nuclear Experiment (radiochemistry, nuclear synthesis)
-    'nucl-th',     # Nuclear Theory (nuclear reaction mechanisms)
-    'hep-ex',      # High Energy Physics - Experiment (particle detection chemistry)
-    'hep-ph',      # High Energy Physics - Phenomenology (fundamental interactions)
+    # Additional quantitative biology
+    'q-bio.GN',    # Genomics (pharmacogenomics)
+    'q-bio.PE',    # Populations and Evolution
+    'q-bio.NC',    # Neurons and Cognition (neurochemistry)
+    'q-bio.OT',    # Other Quantitative Biology
     
-    # ==================== ASTROPHYSICS (Astrochemistry) ====================
-    'astro-ph.EP', # Earth and Planetary Astrophysics (planetary chemistry)
-    'astro-ph.GA', # Astrophysics of Galaxies (interstellar chemistry)
-    'astro-ph.SR', # Solar and Stellar Astrophysics (stellar nucleosynthesis)
-    'astro-ph.IM', # Instrumentation and Methods (astronomical spectroscopy)
+    # Additional statistics
+    'stat.CO',     # Computation
+    'stat.TH',     # Theory
+    'stat.OT',     # Other Statistics
     
-    # ==================== NONLINEAR SCIENCES ====================
-    'nlin.AO',     # Adaptation and Self-Organizing Systems (self-assembly)
-    'nlin.CD',     # Chaotic Dynamics (chaos in chemical reactions)
-    'nlin.PS',     # Pattern Formation (chemical patterns, Turing patterns)
+    # Selected mathematics
+    'math.PR',     # Probability (stochastic models)
+    'math.AP',     # Analysis of PDEs
+    'math.SP',     # Spectral Theory
     
-    # ==================== ECONOMICS (Relevant to Chemical Industry) ====================
-    'econ.GN',     # General Economics (chemical industry economics)
-    
-    # ==================== ELECTRICAL ENGINEERING & SYSTEMS SCIENCE ====================
-    'eess.AS',     # Audio and Speech Processing (chemical acoustic analysis)
-    'eess.IV',     # Image and Video Processing (microscopy, spectral imaging)
-    'eess.SP',     # Signal Processing (chemical signal analysis, NMR processing)  
-    'eess.SY',     # Systems and Control (chemical process control)
-    
-    # ==================== ADDITIONAL INTERDISCIPLINARY CATEGORIES ====================
-    # These categories often contain chemical synthesis research
-    'quant-ph',    # Quantum Physics (quantum chemistry, quantum materials)
-    'gr-qc',       # General Relativity (cosmochemistry, extreme conditions)
+    # Quantum physics (for quantum chemistry)
+    'quant-ph',    # Quantum Physics
 ]
 
 def search_arxiv(
     query: str,
     max_results: int = 5,
-    sort_by: arxiv.SortCriterion = arxiv.SortCriterion.Relevance
+    sort_by: arxiv.SortCriterion = arxiv.SortCriterion.Relevance,
+    use_extended_categories: bool = False
 ) -> List[Dict[str, Any]]:
     """
-    Searches arXiv for papers matching the query, filtered by relevant scientific categories.
+    Searches arXiv for papers matching the query, with improved category filtering.
 
     Args:
-        query: The search query (e.g., "quantum computing", "author:John Doe").
-        max_results: Maximum number of results to return.
-        sort_by: arxiv.SortCriterion for ordering results (Relevance, LastUpdatedDate, SubmittedDate).
+        query: The search query
+        max_results: Maximum number of results to return
+        sort_by: arxiv.SortCriterion for ordering results
+        use_extended_categories: Whether to use extended category list for broader search
 
     Returns:
-        A list of dictionaries, where each dictionary contains metadata for an arXiv paper.
-        Returns an empty list on error or if no results.
+        A list of dictionaries containing paper metadata
     """
     search_results_list: List[Dict[str, Any]] = []
-    try:
-        # <<< MODIFIED: Build a category-specific query string >>>
-        category_query = " OR ".join([f"cat:{cat}" for cat in RELEVANT_ARXIV_CATEGORIES])
-        # Final query combines user's term with our category filter
-        # e.g., "(aspirin synthesis) AND (cat:chem OR cat:cond-mat.mtrl-sci)"
-        filtered_query = f"({query}) AND ({category_query})"
-        
-        print(f"Executing filtered arXiv search with query: {filtered_query}")
+    
+    # Choose category set based on search strategy
+    relevant_categories = EXTENDED_CHEMISTRY_CATEGORIES if use_extended_categories else CHEMISTRY_FOCUSED_CATEGORIES
+    
+    try:   
+        print(f"Executing arXiv search with query: '{query}' using {'extended' if use_extended_categories else 'focused'} categories")
 
         search = arxiv.Search(
-            query=filtered_query,
-            max_results=max_results,
+            query=query,
+            max_results=max_results * 4,  # Fetch more to allow for filtering
             sort_by=sort_by
         )
         
         client = arxiv.Client()
-        results_iterable = client.results(search)
+        all_results = list(client.results(search))
 
-        for res in results_iterable:
+        if not all_results:
+            print(f"No results found for query: '{query}'")
+            return []
+
+        # Filter and prioritize results
+        chemistry_papers = []
+        other_relevant_papers = []
+        other_papers = []
+
+        relevant_categories_set = set(relevant_categories)
+        primary_chemistry_categories = {'chem-ph', 'physics.chem-ph', 'q-bio.BM', 'q-bio.MN', 'q-bio.QM'}
+
+        for res in all_results:
+            paper_categories = set(res.categories)
+            
+            # Check relevance level
+            if not paper_categories.isdisjoint(primary_chemistry_categories):
+                chemistry_papers.append(res)
+            elif not paper_categories.isdisjoint(relevant_categories_set):
+                other_relevant_papers.append(res)
+            else:
+                # Check if the title/abstract suggests chemistry relevance
+                title_abstract = (res.title + " " + res.summary).lower()
+                chemistry_keywords = [
+                    'synthesis', 'chemical', 'molecule', 'drug', 'pharmaceutical', 
+                    'compound', 'reaction', 'catalyst', 'organic', 'medicinal',
+                    'pharmacology', 'therapeutic', 'inhibitor', 'binding',
+                    'ibuprofen', 'nsaid', 'anti-inflammatory'
+                ]
+                
+                if any(keyword in title_abstract for keyword in chemistry_keywords):
+                    other_papers.append(res)
+
+        # Combine results with priority: chemistry > other relevant > other
+        final_results = (chemistry_papers + other_relevant_papers + other_papers)[:max_results]
+        
+        print(f"Found {len(chemistry_papers)} primary chemistry papers, "
+              f"{len(other_relevant_papers)} other relevant papers, "
+              f"{len(other_papers)} keyword-matched papers")
+
+        for res in final_results:
             authors_list = [str(author) for author in res.authors]
-            categories_list = res.categories
             
             search_results_list.append({
                 "entry_id": res.entry_id,
@@ -178,16 +159,17 @@ def search_arxiv(
                 "summary": res.summary,
                 "published": res.published.isoformat() if res.published else None,
                 "updated": res.updated.isoformat() if res.updated else None,
-                "categories": categories_list,
+                "categories": res.categories,
                 "doi": res.doi,
                 "pdf_url": res.pdf_url,
                 "comment": res.comment,
                 "journal_ref": res.journal_ref,
                 "primary_category": res.primary_category,
-                # Add a source field for easy identification in the UI
                 "source_db": "arXiv"
             })
+        
         return search_results_list
+        
     except Exception as e:
         print(f"Error during arXiv search for query '{query}': {e}")
         return []
