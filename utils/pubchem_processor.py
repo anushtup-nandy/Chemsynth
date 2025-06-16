@@ -27,9 +27,8 @@ def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str
         ('formula', query)
     ]
     
-    # If query looks like a CAS number, add it as a priority search
     if _is_cas_number(query):
-        search_strategies.insert(0, ('name', query))  # CAS numbers can be searched as names
+        search_strategies.insert(0, ('name', query))  
         print(f"Detected CAS number format: {query}")
     
     compounds = []
@@ -38,7 +37,7 @@ def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str
     for search_type, search_term in search_strategies:
         try:
             print(f"Trying PubChem search with {search_type}: '{search_term}'")
-            compounds = pcp.get_compounds(search_term, search_type, listkey_count=10)  # Increased count
+            compounds = pcp.get_compounds(search_term, search_type, listkey_count=10) 
             if compounds:
                 successful_strategy = search_type
                 print(f"Success with {search_type} search - found {len(compounds)} compounds")
@@ -66,7 +65,6 @@ def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str
                     pmid_list = []
             except AttributeError:
                 print(f"Compound CID {cid} does not have pmids attribute - trying alternative method")
-                # Try to get PMIDs using direct API call
                 pmid_list = _get_pmids_alternative(cid)
             
             if not pmid_list:
@@ -98,7 +96,6 @@ def _is_cas_number(query: str) -> bool:
 def _get_best_compound_name(compound) -> str:
     """Get the best available name for a compound"""
     try:
-        # Try synonyms first (often includes common names)
         if hasattr(compound, 'synonyms') and compound.synonyms:
             return compound.synonyms[0]
     except:
@@ -112,13 +109,11 @@ def _get_best_compound_name(compound) -> str:
         pass
     
     try:
-        # Try molecular formula
         if hasattr(compound, 'molecular_formula') and compound.molecular_formula:
             return f"Compound with formula {compound.molecular_formula}"
     except:
         pass
     
-    # Fallback to CID
     return f'CID-{compound.cid}'
 
 def _get_pmids_alternative(cid: int) -> List[int]:

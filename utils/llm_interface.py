@@ -3,9 +3,6 @@ import google.generativeai as genai
 from typing import Optional, Dict, Any
 import time
 
-# Attempt to import APP_CONFIG. If it fails, it means we are likely running this script directly
-# for testing, or the main app hasn't set up the config path properly.
-# In a real app, config.py should be in the root andPYTHONPATH set up.
 try:
     from config import APP_CONFIG
 except ImportError:
@@ -24,7 +21,6 @@ if APP_CONFIG.GEMINI_API_KEY:
         genai.configure(api_key=APP_CONFIG.GEMINI_API_KEY)
     except Exception as e:
         print(f"Error configuring Google Generative AI: {e}. Ensure GEMINI_API_KEY is valid.")
-        # Potentially raise an error or set a flag indicating LLM is unavailable
 else:
     print("Warning: GEMINI_API_KEY not found in APP_CONFIG. LLM functionality will be disabled.")
 

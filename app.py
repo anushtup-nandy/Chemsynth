@@ -3,16 +3,11 @@ from flask import Flask, render_template, request, jsonify
 import sys
 import os
 import traceback
-
-# Add utils directory to path if needed
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 
-# Core logic imports
 from core_logic.literature_analysis import perform_literature_search
 from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route, resolve_molecule_identifier
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
-
-# Utils imports
 from utils.pubchem_processor import search_pubchem_literature
 try:
     import pubchempy as pcp
@@ -21,15 +16,11 @@ except ImportError:
     PUBCHEM_AVAILABLE = False
     print("Warning: pubchempy not available. Some functionality may be limited.")
 
-# Initialize Flask App
 app = Flask(__name__)
 
-# --- Primary Route to Serve the Frontend ---
 @app.route('/')
 def index():
     return render_template('index.html')
-
-# --- API Endpoints ---
 
 # --- UTILITY ENDPOINT ---
 @app.route('/api/resolve_identifier', methods=['POST'])
@@ -119,14 +110,10 @@ def api_literature_search():
                     if compounds and compounds[0]:
                         compound = compounds[0]
                         
-                        # Try to get the best common name
-                        compound_name = None
-                        
-                        # First try synonyms (often includes common names)
+                        compound_name = None                        
                         try:
                             if hasattr(compound, 'synonyms') and compound.synonyms:
                                 synonyms = compound.synonyms
-                                # Prefer shorter names that don't look like IUPAC names
                                 common_names = [s for s in synonyms if len(s) < 30 and not any(char in s for char in ['(', ')', '[', ']', ','])]
                                 if common_names:
                                     compound_name = common_names[0]
@@ -164,7 +151,6 @@ def api_literature_search():
             max_results=max_results
         )
         
-        # Add resolution info to results for debugging
         if 'search_info' not in results:
             results['search_info'] = {}
         
@@ -263,7 +249,6 @@ def api_analyze_sourcing():
 
     try:
         print(f"Analyzing sourcing for {len(route_steps)} route steps, target amount: {target_amount_g}g")
-        # This function comes from core_logic/sourcing_analysis.py
         analysis_results = analyze_route_cost_and_sourcing(route_steps, target_amount_g)
         return jsonify(analysis_results)
     except Exception as e:
