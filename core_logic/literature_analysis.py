@@ -9,59 +9,42 @@ def is_cas_number(query: str) -> bool:
     cas_pattern = r'^\d{2,7}-\d{2}-\d$'
     return bool(re.match(cas_pattern, query.strip()))
 
-def get_search_cascade(original_query: str, compound_name: str = None) -> list[str]:
+def get_search_cascade(original_query: str, compound_name: str = None) -> tuple[list[str], str]:
     """
-    Generates a list of search queries, from most specific to most broad.
-    
-    Args:
-        original_query: The user's initial input.
-        compound_name: The resolved common name of the compound.
-
-    Returns:
-        A list of unique search terms to try in order.
+    Generates a list of contextualized search queries, from most specific to most broad.
     """
     cascade = []
+    base_terms = []
 
     # Level 1 & 2: Original query and resolved name
     if original_query:
-        cascade.append(original_query.strip())
+        base_terms.append(original_query.strip())
     if compound_name and compound_name.strip().lower() != original_query.strip().lower():
-        cascade.append(compound_name.strip())
-
-    # Level 3: Parent Compound Extraction (Heuristic)
-    # This is a simple heuristic. A more advanced version might use SMARTS patterns.
-    base_name_to_search = compound_name or original_query
-    # Regex to find common chemical parent names (often ending in -ole, -ine, -ene, etc.)
-    # It strips prefixes like "2,5-dichloro-", "N-methyl-", etc.
-    match = re.search(r'([a-zA-Z]{4,})', base_name_to_search.replace('-', ' '))
-    if match:
-        parent_compound = match.group(1)
-        # Avoid generic terms like 'acid', 'methyl'
-        if parent_compound and len(parent_compound) > 4 and parent_compound.lower() not in ['acid', 'methyl', 'ethyl', 'propyl', 'phenyl']:
-             # Example: "2,5-dichlorobenzoxazole" -> "dichlorobenzoxazole" -> "benzoxazole"
-            if 'chloro' in parent_compound: parent_compound = parent_compound.replace('chloro', '')
-            if 'bromo' in parent_compound: parent_compound = parent_compound.replace('bromo', '')
-            if 'di' in parent_compound: parent_compound = parent_compound.replace('di', '')
-            if 'tri' in parent_compound: parent_compound = parent_compound.replace('tri', '')
-            cascade.append(parent_compound)
-
-    # Level 4: General Class Synthesis
-    if len(cascade) > 1: # If we have a parent/common name
-        base_term = cascade[1] # Use the common name
-        cascade.append(f'"{base_term}" synthesis')
-        cascade.append(f'"{base_term}" preparation')
-        
-    # Level 5: Broad Web Search Query
-    web_query_terms = [term for term in [original_query, compound_name] if term]
-    web_query = " OR ".join(f'"{term}"' for term in web_query_terms)
-    web_query += " synthesis OR reaction OR mechanism"
+        base_terms.append(compound_name.strip())
     
-    # Remove duplicates while preserving order
+    # Contextualize base terms
+    for term in set(base_terms):
+        # The query for scholarly databases should be specific
+        cascade.append(f'"{term}" AND (synthesis OR reaction OR chemical OR molecule)')
+        cascade.append(term) # Also try without context as a fallback
+
+    # Level 3: Parent Compound Extraction
+    base_name_to_search = compound_name or original_query
+    match = re.search(r'([a-zA-Z]{5,})', base_name_to_search.replace('-', ' '))
+    if match:
+        parent_compound = match.group(1).lower()
+        if parent_compound not in ['acid', 'chloro', 'bromo', 'di', 'tri']:
+            cascade.append(f'"{parent_compound}" synthesis')
+
+    # Create a clean, unique cascade
     seen = set()
     unique_cascade = [x for x in cascade if not (x in seen or seen.add(x))]
     
-    print(f"Generated search cascade: {unique_cascade}")
+    # Create the broad web query separately
+    web_query = " OR ".join(f'"{term}"' for term in set(base_terms))
+    web_query += " synthesis method OR preparation OR reaction mechanism"
     
+    print(f"Generated search cascade: {unique_cascade}")
     return unique_cascade, web_query
 
 def perform_literature_search(query: str, compound_name: str = None, resolved_smiles: str = None, max_results: int = 5) -> dict:
@@ -69,11 +52,8 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
     Orchestrates a literature search using a hierarchical cascade strategy.
     """
     results = {
-        "arxiv_papers": [],
-        "pubchem_papers": [],
-        "web_results": [],
-        "errors": [],
-        "search_log": [] # To track what was searched
+        "arxiv_papers": [], "pubchem_papers": [], "europe_pmc_papers": [], 
+        "web_results": [], "errors": [], "search_log": []
     }
 
     # Generate the cascade of search terms
@@ -95,9 +75,9 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
                 # For arXiv, use extended categories on later attempts
                 use_extended = i > 0
                 if source_name == "arXiv":
-                    found_results = search_function(term, max_results=max_results, use_extended_categories=use_extended)
+                    found_results = search_function(term, max_results=max_results* 2, use_extended_categories=use_extended)
                 else: # PubChem
-                    found_results = search_function(term, max_results=max_results)
+                    found_results = search_function(term, max_results=max_results* 2)
 
                 if found_results:
                     log_entry = f"  => Success! Found {len(found_results)} results for '{term}'."
@@ -151,22 +131,37 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
                 results['errors'].append(error_msg)
 
     # --- Combine and format results ---
-    all_papers = results.get("arxiv_papers", []) + results.get("pubchem_papers", []) + results.get("europe_pmc_papers", [])
-    seen_titles = set()
-    unique_papers = []
-    for paper in all_papers:
-        title = paper.get('title')
-        if title and isinstance(title, str) and title.lower() not in seen_titles:
-            unique_papers.append(paper)
-            seen_titles.add(title.lower())
-    
+    all_papers_raw = (
+        results.get("arxiv_papers", []) + 
+        results.get("pubchem_papers", []) + 
+        results.get("europe_pmc_papers", [])
+    )
+
+    # 1. Deduplicate first to avoid scoring the same paper multiple times
+    seen_ids = set()
+    unique_papers_raw = []
+    for paper in all_papers_raw:
+        # Use DOI or entry_id as a unique identifier
+        paper_id = paper.get('doi') or paper.get('entry_id')
+        if paper_id and paper_id not in seen_ids:
+            unique_papers_raw.append(paper)
+            seen_ids.add(paper_id)
+
+    # 2. Score and filter the unique papers
+    relevant_papers = score_and_filter_results(unique_papers_raw, search_cascade)
+
+    print(f"Found {len(all_papers_raw)} raw results, "
+          f"filtered down to {len(relevant_papers)} relevant papers after scoring.")
+
+    # 3. Format the final, relevant papers
     formatted_papers = [
         {
             "title": p.get("title"),
             "source": f"{', '.join(p.get('authors', [])[:3])}... ({str(p.get('published', 'N/A'))[:4]}) - {p.get('source_db', 'N/A')}",
             "abstract": p.get("summary"),
-            "url": p.get("pdf_url")
-        } for p in unique_papers
+            "url": p.get("pdf_url"),
+            "relevance_score": p.get("relevance_score") # Include for transparency
+        } for p in relevant_papers[:max_results] # Return top N results
     ]
 
     print(f"Literature search complete. Found {len(formatted_papers)} unique papers.")
@@ -183,3 +178,82 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
             "errors": results['errors']
         }
     }
+
+def score_and_filter_results(
+    all_papers: list, 
+    search_terms: list, 
+    min_relevance_score: int = 2
+) -> list:
+    """
+    Scores papers based on chemical relevance and filters out irrelevant results.
+
+    Args:
+        all_papers: A list of combined paper dictionaries from all sources.
+        search_terms: The list of terms used in the search cascade (for scoring).
+        min_relevance_score: The minimum score required to keep a paper.
+
+    Returns:
+        A sorted list of relevant paper dictionaries.
+    """
+    scored_papers = []
+    
+    # Define chemistry-related keywords and irrelevant field keywords
+    CHEM_KEYWORDS = {
+        'synthesis', 'reaction', 'chemical', 'molecule', 'compound', 'organic', 
+        'medicinal', 'pharmacology', 'catalyst', 'inhibitor', 'binding', 
+        'derivative', 'scaffold', 'reagent', 'yield', 'spectroscopy', 'nmr'
+    }
+    IRRELEVANT_KEYWORDS = {
+        'astrophysics', 'galaxy', 'cosmology', 'black hole', 'star', 'nebula',
+        'economics', 'finance', 'market', 'sociology', 'gravity', 'quantum field',
+        'string theory', 'mathematics' # Use 'mathematics' carefully, can overlap
+    }
+
+    # Use the first two (most specific) search terms for primary scoring
+    primary_search_terms = {term.lower() for term in search_terms[:2]}
+
+    for paper in all_papers:
+        relevance_score = 0
+        title = paper.get('title', '').lower()
+        abstract = paper.get('summary', '').lower()
+        text_content = title + " " + abstract
+
+        # --- Scoring Logic ---
+
+        # 1. Direct hit on primary search term (highest value)
+        if any(term in title for term in primary_search_terms):
+            relevance_score += 10
+        elif any(term in abstract for term in primary_search_terms):
+            relevance_score += 5
+
+        # 2. Source credibility bonus
+        source_db = paper.get('source_db', '')
+        if 'PubChem' in source_db or 'Europe PMC' in source_db:
+            relevance_score += 3  # These are highly relevant sources
+
+        # 3. Chemistry keyword bonus
+        found_chem_keywords = len(CHEM_KEYWORDS.intersection(text_content.split()))
+        relevance_score += found_chem_keywords
+
+        # 4. arXiv category bonus/penalty
+        if source_db == 'arXiv':
+            categories = paper.get('categories', [])
+            if any(cat.startswith('chem') or cat.startswith('cond-mat.mtrl-sci') or cat.startswith('q-bio') for cat in categories):
+                relevance_score += 5
+            # Penalize physics categories that are not chem-related
+            if any(cat.startswith('astro-ph') or cat.startswith('gr-qc') or cat.startswith('hep-') for cat in categories):
+                relevance_score -= 20
+            if 'math-ph' in categories or 'math.' in str(categories):
+                relevance_score -= 10
+
+        # 5. Penalty for irrelevant keywords
+        found_irrelevant_keywords = len(IRRELEVANT_KEYWORDS.intersection(text_content.split()))
+        relevance_score -= found_irrelevant_keywords * 5
+
+        # --- Final Decision ---
+        if relevance_score >= min_relevance_score:
+            paper['relevance_score'] = relevance_score # Add score to dict for debugging
+            scored_papers.append(paper)
+
+    # Sort by relevance score, descending
+    return sorted(scored_papers, key=lambda x: x['relevance_score'], reverse=True)
