@@ -8,7 +8,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.23.0/cytoscape.min.js"></script>
-    <!-- Link to our external stylesheet -->
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -198,7 +199,26 @@
     <footer class="bg-gray-900 border-t border-gray-800">
         <!-- Footer content remains the same -->
     </footer>
-
+    <div id="new-route-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 transition-opacity duration-300">
+        <div class="bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-lg border border-gray-700">
+            <h3 class="text-lg font-bold mb-2 gradient-text-blue">Suggest an Alternative Route</h3>
+            <p class="text-sm text-gray-400 mb-4">
+                Guide the AI by suggesting a specific reaction type, a different starting material, or any other constraint.
+            </p>
+            
+            <div>
+                <label for="new-route-suggestion-input" class="block text-sm font-medium text-gray-300 mb-1">Your Suggestion:</label>
+                <textarea id="new-route-suggestion-input" rows="4" class="molecule-input w-full p-3 rounded-lg" placeholder="e.g., 'Use a Heck reaction to form the C-C bond' or 'Start from commercially available aniline'"></textarea>
+            </div>
+            
+            <div class="mt-6 flex justify-end space-x-4">
+                <button id="cancel-new-route-btn" class="bg-gray-600 text-gray-200 hover:bg-gray-500 font-medium py-2 px-4 rounded-lg">Cancel</button>
+                <button id="submit-new-route-btn" class="gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg hover:shadow-lg">
+                    <i class="fas fa-cogs mr-2"></i> Generate Route
+                </button>
+            </div>
+        </div>
+    </div>
     <!-- Link to our external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>

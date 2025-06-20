@@ -8,6 +8,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from core_logic.literature_analysis import perform_literature_search
 from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route, resolve_molecule_identifier
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
+from core_logic.chemfm_synthesis_engine import generate_route_with_chemfm
 from utils.pubchem_processor import search_pubchem_literature
 try:
     import pubchempy as pcp
@@ -260,22 +261,28 @@ def api_analyze_sourcing():
 @app.route('/api/generate_new_route', methods=['POST'])
 def api_generate_new_route():
     """
-    API endpoint to generate alternative synthesis routes.
+    API endpoint to generate alternative synthesis routes using the ChemFM engine.
     """
     data = request.json
-    target_identifier = data.get('identifier')
-    constraints = data.get('constraints', {})
+    # The frontend sends 'target_smiles' and 'suggestion' now
+    target_smiles = data.get('target_smiles')
+    suggestion = data.get('suggestion', 'Any reasonable synthesis.') # Default suggestion
     
-    if not target_identifier:
-        return jsonify({"error": "Target molecule identifier is required."}), 400
+    if not target_smiles:
+        return jsonify({"error": "Target molecule SMILES is required."}), 400
     
     try:
-        print(f"Generating new route for: '{target_identifier}' with constraints: {constraints}")
-        # Use the generate_hypothetical_route function
-        results = generate_hypothetical_route(target_identifier, constraints)
+        print(f"Generating new ChemFM route for: '{target_smiles}' with suggestion: '{suggestion}'")
+        # Call the new function from our new engine
+        results = generate_route_with_chemfm(target_smiles, suggestion)
+        
+        if "error" in results:
+             # Pass the specific error from the engine to the frontend
+            return jsonify(results), 500
+            
         return jsonify(results)
     except Exception as e:
-        print(f"An error occurred during route generation: {e}")
+        print(f"An error occurred during ChemFM route generation: {e}")
         print(traceback.format_exc())
         return jsonify({"error": "An internal server error occurred during route generation."}), 500
 

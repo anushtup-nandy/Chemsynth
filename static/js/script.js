@@ -1,9 +1,11 @@
+// static/js/script.js
+
 // Global variables
 let synthesisRoutesData = [];
 let literatureResults = [];
-let sourcingData = {}; // <<< NEW: Store sourcing/cost analysis results by route ID
-let currentTargetSMILES = ''; // Store the resolved SMILES for the "New Route" feature
-let cy; //Global variable for the Cytoscape instance
+let sourcingData = {}; 
+let currentTargetSMILES = ''; 
+let cy; 
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -28,14 +30,25 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressStepsContainer = document.getElementById('project-progress-steps');
     const mainTabs = document.getElementById('main-tabs');
 
+    // --- MODIFIED: Selectors for the new modal ---
+    const newRouteModal = document.getElementById('new-route-modal');
+    const cancelNewRouteBtn = document.getElementById('cancel-new-route-btn');
+    const submitNewRouteBtn = document.getElementById('submit-new-route-btn');
+    const newRouteSuggestionInput = document.getElementById('new-route-suggestion-input');
+
+
     // --- Initial State Setup ---
-    updateProgress(0); // Initialize progress bar
-    setupTabControls(); // Activate main tabs
+    updateProgress(0); 
+    setupTabControls();
 
     // --- Event Listeners ---
     searchButton.addEventListener('click', handleSearch);
-    newRouteButton.addEventListener('click', handleNewRoute);
     literatureSortSelect.addEventListener('change', handleSortLiterature);
+
+    // --- MODIFIED: Event listeners for the new modal ---
+    newRouteButton.addEventListener('click', handleNewRouteClick); // Changed function name
+    cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
+    submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit); // Changed function name
 
     // --- Main Handler Functions ---
     async function handleSearch(event) {
@@ -48,12 +61,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        updateProgress(0, true); // Reset and show loading
+        updateProgress(0, true); 
         
         try {
             const resolvedData = await resolveIdentifier(identifier);
             if (resolvedData) {
                 const literatureQuery = (resolvedData.name + ' ' + keywords).trim();
+                currentTargetSMILES = resolvedData.smiles; // Save the SMILES for later use
                 fetchLiterature(literatureQuery);
                 fetchSynthesisPlan(identifier); 
                 document.getElementById('project-target-molecule-name').textContent = `Target: ${resolvedData.name}`;
@@ -65,17 +79,39 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function handleNewRoute() {
+    // --- REFACTORED: New route handling logic ---
+
+    // 1. This function is called when the main "New Route" button is clicked. It just shows the modal.
+    function handleNewRouteClick() {
         if (!currentTargetSMILES) {
             alert("Please perform a search for a target molecule first.");
             return;
         }
+        // Show the modal
+        newRouteModal.classList.remove('hidden');
+        newRouteSuggestionInput.focus();
+    }
 
-        const suggestion = prompt("Suggest an alternative reaction or approach (e.g., 'Use a Suzuki coupling for step 1'):");
-        if (!suggestion || suggestion.trim() === '') return;
+    // 2. This function is called when the "Generate Route" button inside the modal is clicked.
+    async function handleNewRouteSubmit() {
+        const suggestion = newRouteSuggestionInput.value.trim();
+        if (!suggestion) {
+            alert("Please provide a suggestion to guide the AI.");
+            return;
+        }
 
-        this.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Generating...';
-        this.disabled = true;
+        // Hide the modal and clear the input for next time
+        newRouteModal.classList.add('hidden');
+        newRouteSuggestionInput.value = '';
+
+        // Trigger the API call
+        generateNewRouteApiCall(suggestion);
+    }
+    
+    // 3. This function contains the actual API call logic, separated for clarity.
+    async function generateNewRouteApiCall(suggestion) {
+        newRouteButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Generating...';
+        newRouteButton.disabled = true;
 
         try {
             const response = await fetch('/api/generate_new_route', {
@@ -83,22 +119,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     suggestion: suggestion,
-                    existing_routes: synthesisRoutesData,
-                    target_smiles: currentTargetSMILES
+                    target_smiles: currentTargetSMILES // Use the globally stored SMILES
                 }),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to generate new route.');
             
-            addNewRouteToDisplay(data.new_route);
+            // The API now returns { "new_route": {...} }
+            if (data.new_route) {
+                addNewRouteToDisplay(data.new_route);
+            } else {
+                throw new Error("API did not return a valid new route object.");
+            }
+            
         } catch (error) {
             console.error('Error generating new route:', error);
             alert(`Error: ${error.message}`);
         } finally {
-            this.innerHTML = '<i class="fas fa-plus mr-2"></i> New Route';
-            this.disabled = false;
+            newRouteButton.innerHTML = '<i class="fas fa-plus mr-2"></i> New Route';
+            newRouteButton.disabled = false;
         }
     }
+
 
     function handleSortLiterature() {
         const sortBy = literatureSortSelect.value;
@@ -107,11 +149,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (sortBy === 'date') {
             sortedResults.sort((a, b) => new Date(b.published) - new Date(a.published));
         } else if (sortBy === 'citations') {
-            sortedResults.sort((a, b) => {
-                const versionA = parseInt(a.entry_id.slice(-1)) || 0;
-                const versionB = parseInt(b.entry_id.slice(-1)) || 0;
-                return versionB - versionA;
-            });
+            sortedResults.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
         }
         else {
              sortedResults = [...literatureResults];
@@ -121,18 +159,17 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function addNewRouteToDisplay(newRoute) {
-        newRoute.id = newRoute.id || `route_hypothetical_${synthesisRoutesData.length}`;
+        newRoute.id = newRoute.id || `route_chemfm_${synthesisRoutesData.length}`;
         synthesisRoutesData.push(newRoute);
-        fetchSourcingAndCost([newRoute]); // Fetch analysis for the new route
+        fetchSourcingAndCost([newRoute]); 
         renderRouteTabs(synthesisRoutesData, newRoute.id);
         renderSingleRoute(newRoute);
-        // If KG tab is active, render the new route's graph
         if (document.querySelector('#main-tabs .tab-link[data-tab="knowledge"].border-blue-500')) {
             renderKnowledgeGraph(newRoute.id);
         }
     }
 
-    // --- API Fetching Functions ---
+    // --- API Fetching Functions (No changes needed from here down) ---
     async function resolveIdentifier(identifier) {
         const response = await fetch('/api/resolve_identifier', {
             method: 'POST',
@@ -163,13 +200,10 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (data.routes && data.routes.length > 0) {
                 synthesisRoutesData = data.routes;
-                if (data.routes[0].steps.length > 0) {
-                    currentTargetSMILES = data.routes[0].steps[data.routes[0].steps.length - 1].product.smiles;
-                }
                 renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
                 renderSingleRoute(synthesisRoutesData[0]);
-                updateProgress(2); // Synthesis complete
-                fetchSourcingAndCost(synthesisRoutesData); // <<< NEW: Fetch analysis after routes are found
+                updateProgress(2); 
+                fetchSourcingAndCost(synthesisRoutesData);
             } else {
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
                 updateProgress(1);
@@ -207,7 +241,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function fetchSourcingAndCost(routes) {
-        updateProgress(3, true); // Sourcing step is loading
+        updateProgress(3, true); 
         const analysisPromises = routes.map(route =>
             fetch('/api/analyze_sourcing', {
                 method: 'POST',
@@ -228,10 +262,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         
-        updateProgress(4); // Sourcing & Costing complete
+        updateProgress(4); 
     }
     
-    // --- UI Control and Rendering ---
+    // --- UI Control and Rendering (No changes needed below this line) ---
     function setupTabControls() {
         mainTabs.addEventListener('click', (e) => {
             e.preventDefault();
@@ -253,14 +287,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const activeContent = document.getElementById(`${tabName}-content`);
             activeContent.classList.remove('hidden');
 
-            // <<< FIX #1: The condition must include 'knowledge' to trigger rendering.
             if (tabName === 'sourcing' || tabName === 'cost' || tabName === 'knowledge') {
                 const activeRouteTab = document.querySelector('.route-tab.border-blue-500');
                 if (activeRouteTab) {
                     const activeRouteId = activeRouteTab.dataset.routeId;
                     if (tabName === 'sourcing') renderSourcingInfo(activeRouteId);
                     if (tabName === 'cost') renderCostAnalysis(activeRouteId);
-                    // This now gets called correctly when the 'knowledge' tab is clicked.
                     if (tabName === 'knowledge') renderKnowledgeGraph(activeRouteId);
                 }
             }
@@ -288,11 +320,16 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderRouteTabs(routes, activeRouteId) {
         let tabsHtml = `<nav class="-mb-px flex space-x-8">`;
         routes.forEach((route, index) => {
-            const defaultName = `Route ${String.fromCharCode(65 + index)}`;
+            const isHypothetical = route.id.includes('chemfm') || route.id.includes('hypothetical');
+            const defaultName = isHypothetical ? `ChemFM Route ${index - (routes.length - 1) + 1}` : `Route ${String.fromCharCode(65 + index)}`;
             const routeName = route.name || defaultName;
             const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
+            
+            const rawYield = route.overall_yield || 0;
+            const displayYield = rawYield > 1 ? rawYield : rawYield * 100;
+
             tabsHtml += `<a href="#" class="${isActive} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm route-tab" data-route-id="${route.id}">
-                            ${routeName} (${(route.overall_yield || 0).toFixed(1)}% yield)
+                            ${routeName} (${displayYield.toFixed(1)}% yield)
                         </a>`;
         });
         tabsHtml += '</nav>';
@@ -306,13 +343,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
 
-                // Update view if the corresponding main tab is active
                 const activeMainTab = document.querySelector('#main-tabs .tab-link.border-blue-500');
                 if (activeMainTab) {
                     const tabName = activeMainTab.dataset.tab;
                     if (tabName === 'sourcing') renderSourcingInfo(routeId);
                     if (tabName === 'cost') renderCostAnalysis(routeId);
-                    // <<< FIX #2: Add the missing check here to update the graph when switching routes.
                     if (tabName === 'knowledge') renderKnowledgeGraph(routeId);
                 }
             });
@@ -343,7 +378,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>`;
 
         route.steps.forEach(step => {
-            const isFinalProduct = step.step_number === route.steps.length;
+            const isFinalProduct = step.product.smiles === currentTargetSMILES;
             const borderColor = isFinalProduct ? 'border-2 border-blue-500' : '';
             const textColor = isFinalProduct ? 'text-blue-400' : '';
             const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
@@ -351,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="reaction-arrow flex-shrink-0 mx-4 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
                 <div class="molecule-display ${borderColor} flex-shrink-0">
                     <div class="text-center p-4">
-                        <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${step.yield.toFixed(1)}% yield</div>
+                        <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
                         <div class="font-bold ${textColor}">${titleText}</div>
                         <div class="text-xs text-gray-400 mt-1">${step.product.formula}</div>
                     </div>
@@ -375,7 +410,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     ${imageHtml}
                     <div class="flex-grow">
                         <p class="text-sm text-gray-300 mb-3">${step.reagents_conditions}</p>
-                        <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${step.yield.toFixed(1)}%</div>
+                        <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>
                         <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
                     </div>
                 </div>`;
@@ -415,25 +450,20 @@ document.addEventListener('DOMContentLoaded', function() {
         
         let html = '';
         papers.forEach(paper => {
-            const keywordsHtml = (paper.keywords || []).map(kw => 
-                `<span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded">${kw}</span>`
-            ).join(' ');
-            
             const renderedAbstract = marked.parse(paper.abstract || 'No abstract available.');
 
             html += `
-                <div class="bg-gray-700 rounded-lg p-4 mb-4">
+                <div class="bg-gray-700 rounded-lg p-4 mb-4 transition-shadow duration-300 hover:shadow-lg">
                     <div class="flex justify-between items-start">
-                        <div>
-                            <h4 class="font-bold text-blue-400 hover:text-blue-300 cursor-pointer">${paper.title}</h4>
-                            <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
-                        </div>
+                        <a href="${paper.url}" target="_blank" class="flex-grow">
+                            <h4 class="font-bold text-blue-400 hover:text-blue-300">${paper.title}</h4>
+                        </a>
                         <div class="flex items-center space-x-2 flex-shrink-0 ml-4">
-                            <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">Category: ${paper.impact || 'N/A'}</span>
+                             <span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded-full">Score: ${paper.relevance_score || 'N/A'}</span>
                         </div>
                     </div>
+                     <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
                     <div class="text-sm text-gray-300 mb-3">${renderedAbstract}</div>
-                    <div class="flex flex-wrap gap-2">${keywordsHtml}</div>
                 </div>`;
         });
         literatureResultsContainer.innerHTML = html;
@@ -452,6 +482,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let tableRows = '';
         const details = data.sourcing_details || {};
+        if (Object.keys(details).length === 0) {
+            sourcingContent.innerHTML = '<h2 class="text-xl font-bold mb-4">Material Sourcing</h2><p class="text-center text-gray-400 py-8">This route uses intermediates from previous steps. No new starting materials require sourcing.</p>';
+            return;
+        }
+
         for (const smiles in details) {
             const reagent = details[smiles];
             const cheapest = reagent.cheapest_option;
@@ -461,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             tableRows += `
                 <tr class="border-b border-gray-700">
-                    <td class="p-4">${reagent.formula}</td>
+                    <td class="p-4">${reagent.name || reagent.formula}</td>
                     <td class="p-4 font-mono text-xs">${smiles}</td>
                     <td class="p-4">${(reagent.required_amount_g || 0).toFixed(3)} g</td>
                     <td class="p-4">${supplierInfo}</td>
@@ -473,7 +508,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         sourcingContent.innerHTML = `
             <h2 class="text-xl font-bold mb-4">Material Sourcing for Starting Materials</h2>
-            <p class="text-sm text-gray-400 mb-6">${data.assumptions || ''}</p>
             <div class="overflow-x-auto">
                 <table class="w-full text-left">
                     <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
@@ -503,11 +537,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let tableRows = '';
         const details = data.sourcing_details || {};
+        if (Object.keys(details).length === 0) {
+            costContent.innerHTML = '<h2 class="text-xl font-bold mb-4">Estimated Cost Analysis</h2><p class="text-center text-gray-400 py-8">No starting materials require purchasing for this route.</p>';
+            return;
+        }
+
         for (const smiles in details) {
             const reagent = details[smiles];
             tableRows += `
                 <tr class="border-b border-gray-700">
-                    <td class="p-4">${reagent.formula}</td>
+                    <td class="p-4">${reagent.name || reagent.formula}</td>
                     <td class="p-4">${(reagent.required_amount_g || 0).toFixed(3)} g</td>
                     <td class="p-4">${formatCurrency(reagent.cheapest_option?.price_per_g || 0)}</td>
                     <td class="p-4 font-bold">${formatCurrency(reagent.estimated_cost || 0)}</td>
@@ -523,7 +562,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
                  <div class="md:col-span-2 bg-gray-700 rounded-lg p-6">
                     <h3 class="text-sm font-medium text-gray-400 uppercase mb-3">Assumptions</h3>
-                    <p class="text-sm text-gray-300">${data.assumptions || ''}</p>
+                    <ul class="text-xs text-gray-300 list-disc list-inside space-y-1">
+                        ${(data.assumptions || []).map(item => `<li>${item}</li>`).join('')}
+                    </ul>
                 </div>
             </div>
             <h3 class="text-lg font-bold mb-4">Cost Breakdown by Reagent</h3>
@@ -551,40 +592,32 @@ document.addEventListener('DOMContentLoaded', function() {
             container.innerHTML = '<p class="text-center text-gray-500 pt-16">Sourcing and route data not yet available. Please wait for analysis to complete.</p>';
             return;
         }
-        container.innerHTML = ''; // Clear any placeholders
+        container.innerHTML = ''; 
 
-        // 1. Define Nodes
         let nodes = [];
-        // Add final product node
         const finalProduct = route.steps[route.steps.length - 1].product;
         nodes.push({ data: { id: finalProduct.smiles, label: finalProduct.formula, type: 'product' } });
 
-        // Add intermediate and reactant nodes
         let startingMaterials = new Set(Object.keys(sourcing.sourcing_details || {}));
         route.steps.forEach(step => {
             step.reactants.forEach(reactant => {
                 const type = startingMaterials.has(reactant.smiles) ? 'start' : 'intermediate';
                 nodes.push({ data: { id: reactant.smiles, label: reactant.formula, type: type } });
             });
-            // Add intermediate product nodes (if not the final one)
             if (step.product.smiles !== finalProduct.smiles) {
                 nodes.push({ data: { id: step.product.smiles, label: step.product.formula, type: 'intermediate' } });
             }
         });
         
-        // Add vendor nodes
         for (const smiles in sourcing.sourcing_details) {
             const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
             if (cheapest) {
                 nodes.push({ data: { id: cheapest.vendor, label: cheapest.vendor, type: 'vendor' } });
             }
         }
-        // Deduplicate nodes by ID
         nodes = Array.from(new Map(nodes.map(item => [item.data.id, item])).values());
 
-        // 2. Define Edges
         let edges = [];
-        // Reaction edges
         route.steps.forEach((step, i) => {
             const reactionNodeId = `reaction_${route.id}_${i}`;
             nodes.push({ data: { id: reactionNodeId, label: `Step ${step.step_number}`, type: 'reaction' } });
@@ -594,7 +627,6 @@ document.addEventListener('DOMContentLoaded', function() {
             edges.push({ data: { source: reactionNodeId, target: step.product.smiles } });
         });
 
-        // Sourcing edges
         for (const smiles in sourcing.sourcing_details) {
             const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
             if (cheapest) {
@@ -602,12 +634,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // 3. Initialize Cytoscape
         cy = cytoscape({
             container: container,
             elements: { nodes, edges },
             style: [
-                { selector: 'node', style: { 'label': 'data(label)', 'color': '#CBD5E0', 'font-size': '12px', 'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': '5px' } },
+                { selector: 'node', style: { 'label': 'data(label)', 'color': '#CBD5E0', 'font-size': '12px', 'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': '5px', 'background-color': '#4A5568' } },
                 { selector: 'edge', style: { 'width': 2, 'line-color': '#4A5568', 'target-arrow-color': '#4A5568', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
                 { selector: 'node[type="product"]', style: { 'background-color': '#3B82F6', 'shape': 'diamond', 'width': 60, 'height': 60 } },
                 { selector: 'node[type="start"]', style: { 'background-color': '#10B981', 'shape': 'ellipse' } },
@@ -617,16 +648,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 { selector: 'edge[type="supplier"]', style: { 'line-style': 'dashed', 'line-color': '#F59E0B' } },
             ],
             layout: {
-                name: 'breadthfirst',
-                grid: true,
-                spacingFactor: 1.2,
-                roots: Array.from(startingMaterials) // Layout starts from the starting materials
+                name: 'dagre',
+                rankDir: 'LR',
+                spacingFactor: 1.1
             }
         });
         updateProgress(5); 
     }
     
     function formatCurrency(value) {
+        if (typeof value !== 'number') return '$0.00';
         return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
     }
 });
