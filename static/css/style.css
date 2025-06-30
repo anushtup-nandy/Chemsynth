@@ -1,19 +1,124 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
+    /* Dark Theme Colors */
     --primary-dark: #0f172a;
     --secondary-dark: #1e293b;
     --accent-blue: #3b82f6;
     --accent-teal: #14b8a6;
     --accent-purple: #8b5cf6;
+    
+    /* Theme Variables - Default to Dark */
+    --bg-primary: var(--primary-dark);
+    --bg-secondary: var(--secondary-dark);
+    --bg-tertiary: #334155;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --border-color: #334155;
+    --border-hover: var(--accent-blue);
+    --input-bg: var(--secondary-dark);
+    --nav-bg: #111827;
+    --card-bg: #1f2937;
+    --shadow-color: rgba(59, 130, 246, 0.15);
+}
+
+/* Light Theme */
+[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #e2e8f0;
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+    --border-hover: var(--accent-blue);
+    --input-bg: #ffffff;
+    --nav-bg: #ffffff;
+    --card-bg: #ffffff;
+    --shadow-color: rgba(59, 130, 246, 0.1);
 }
 
 body {
     font-family: 'Inter', sans-serif;
-    background-color: var(--primary-dark);
-    color: #e2e8f0;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Navigation Theme Updates */
+nav {
+    background-color: var(--nav-bg) !important;
+    border-bottom-color: var(--border-color) !important;
+    box-shadow: 0 1px 3px 0 var(--shadow-color);
+}
+
+[data-theme="light"] nav {
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+}
+
+.theme-toggle:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-hover);
+}
+
+/* Card and Container Updates */
+.bg-gray-800 {
+    background-color: var(--card-bg) !important;
+    border: 1px solid var(--border-color);
+}
+
+.bg-gray-900 {
+    background-color: var(--nav-bg) !important;
+}
+
+/* Text Color Updates */
+.text-gray-300 {
+    color: var(--text-secondary) !important;
+}
+
+.text-gray-400 {
+    color: var(--text-muted) !important;
+}
+
+.text-gray-500 {
+    color: var(--text-muted) !important;
+}
+
+.text-white {
+    color: var(--text-primary) !important;
+}
+
+/* Border Updates */
+.border-gray-700 {
+    border-color: var(--border-color) !important;
+}
+
+.border-gray-800 {
+    border-color: var(--border-color) !important;
+}
+
+.border-gray-600 {
+    border-color: var(--border-color) !important;
+}
+
+/* Gradient backgrounds remain the same */
 .gradient-bg-blue {
     background: linear-gradient(135deg, var(--accent-blue) 0%, #60a5fa 100%);
 }
@@ -49,25 +154,73 @@ body {
 
 .card-hover {
     transition: all 0.3s ease;
-    border: 1px solid #334155;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
 }
 
 .card-hover:hover {
     transform: translateY(-5px);
-    box-shadow: 0 10px 25px rgba(59, 130, 246, 0.15);
-    border-color: var(--accent-blue);
+    box-shadow: 0 10px 25px var(--shadow-color);
+    border-color: var(--border-hover);
 }
 
 .molecule-input {
-    background-color: var(--secondary-dark);
-    border: 1px solid #334155;
+    background-color: var(--input-bg);
+    border: 1px solid var(--border-color);
     transition: all 0.3s ease;
+    color: var(--text-primary);
 }
 
 .molecule-input:focus {
     outline: none;
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.molecule-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Select elements */
+select {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+/* Buttons */
+.bg-gray-700 {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+.bg-gray-600 {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+.hover\:bg-gray-700:hover {
+    background-color: var(--bg-secondary) !important;
+}
+
+.hover\:bg-gray-500:hover {
+    background-color: var(--bg-secondary) !important;
+}
+
+/* Tab system updates */
+.tab-link {
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+}
+
+.tab-link:hover {
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+}
+
+.tab-link.border-blue-500 {
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
 }
 
 .synthesis-step {
@@ -87,12 +240,19 @@ body {
 
 .agent-log {
     font-family: 'Courier New', monospace;
-    background-color: #1e293b;
+    background-color: var(--bg-secondary);
     border-left: 3px solid var(--accent-blue);
+    color: var(--text-primary);
 }
 
 .nav-link {
     position: relative;
+    color: var(--text-secondary);
+    transition: color 0.3s ease;
+}
+
+.nav-link:hover {
+    color: var(--text-primary);
 }
 
 .nav-link:after {
@@ -110,13 +270,17 @@ body {
     width: 100%;
 }
 
+.nav-link.active {
+    color: var(--text-primary);
+}
+
 .nav-link.active:after {
     width: 100%;
 }
 
 .progress-bar {
     height: 6px;
-    background-color: #334155;
+    background-color: var(--border-color);
     border-radius: 3px;
     overflow: hidden;
 }
@@ -130,17 +294,18 @@ body {
 
 .vendor-card {
     transition: all 0.3s ease;
-    border: 1px solid #334155;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
 }
 
 .vendor-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(59, 130, 246, 0.1);
-    border-color: var(--accent-blue);
+    box-shadow: 0 5px 15px var(--shadow-color);
+    border-color: var(--border-hover);
 }
 
 .reaction-visualization {
-    background-color: var(--secondary-dark);
+    background-color: var(--bg-secondary);
     border-radius: 0.5rem;
     padding: 1rem;
     position: relative;
@@ -156,12 +321,13 @@ body {
 }
 
 .molecule-display {
-    background-color: #334155;
+    background-color: var(--bg-tertiary);
     border-radius: 0.5rem;
     padding: 1rem;
     display: flex;
     align-items: center;
     justify-content: center;
+    color: var(--text-primary);
 }
 
 .cost-indicator {
@@ -200,7 +366,8 @@ body {
 .knowledge-graph {
     width: 100%;
     height: 300px;
-    background-color: var(--secondary-dark);
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     position: relative;
     overflow: hidden;
@@ -226,6 +393,87 @@ body {
 
 .graph-connection {
     position: absolute;
-    background-color: #64748b;
+    background-color: var(--text-muted);
     transform-origin: left center;
+}
+
+/* Modal updates */
+.bg-black {
+    background-color: rgba(0, 0, 0, 0.75) !important;
+}
+
+[data-theme="light"] .bg-black {
+    background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Checkbox and form element updates */
+input[type="checkbox"] {
+    background-color: var(--input-bg);
+    border-color: var(--border-color);
+}
+
+/* Scrollbar styling for both themes */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background-color: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* Footer updates */
+footer {
+    background-color: var(--nav-bg) !important;
+    border-top-color: var(--border-color) !important;
+}
+
+/* Notification badge - keep red for both themes */
+.bg-red-500 {
+    background-color: #ef4444 !important;
+}
+
+/* Profile image and other elements that should remain unchanged */
+img {
+    transition: none;
+}
+
+/* Light theme specific adjustments */
+[data-theme="light"] .gradient-bg-blue {
+    box-shadow: 0 4px 14px 0 rgba(59, 130, 246, 0.2);
+}
+
+[data-theme="light"] .card-hover:hover {
+    box-shadow: 0 10px 25px rgba(59, 130, 246, 0.1);
+}
+
+/* CTA section adjustments for light theme */
+[data-theme="light"] .gradient-bg-blue {
+    color: white;
+}
+
+[data-theme="light"] .gradient-bg-blue .text-white {
+    color: white !important;
+}
+
+/* Animation for theme transition */
+* {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* Preserve animation performance for specific elements */
+.progress-fill,
+.nav-link:after,
+.card-hover,
+.vendor-card,
+.graph-node {
+    transition: all 0.3s ease;
 }

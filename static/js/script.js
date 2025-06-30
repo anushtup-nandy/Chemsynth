@@ -1,11 +1,9 @@
-// static/js/script.js
-
 // Global variables
 let synthesisRoutesData = [];
 let literatureResults = [];
 let sourcingData = {};
 let currentTargetSMILES = '';
-let cy;
+let cy; // Cytoscape instance
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -45,6 +43,15 @@ document.addEventListener('DOMContentLoaded', function() {
     newRouteButton.addEventListener('click', handleNewRouteClick);
     cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
     submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit);
+    routeContentContainer.addEventListener('click', function(e) {
+        if (e.target.matches('.expand-reactant-btn')) {
+            e.preventDefault();
+            const button = e.target;
+            const smiles = button.dataset.smiles;
+            const targetContainerId = button.dataset.target;
+            handleExpandReactant(smiles, targetContainerId, button);
+        }
+    });
 
     // --- Main Handler Functions ---
     async function handleSearch(event) {
@@ -57,6 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        resetUI();
         updateProgress(0, true);
 
         try {
@@ -64,15 +72,31 @@ document.addEventListener('DOMContentLoaded', function() {
             if (resolvedData) {
                 const literatureQuery = (resolvedData.name + ' ' + keywords).trim();
                 currentTargetSMILES = resolvedData.smiles;
-                fetchLiterature(literatureQuery);
-                fetchSynthesisPlan(identifier);
                 document.getElementById('project-target-molecule-name').textContent = `Target: ${resolvedData.name}`;
                 document.getElementById('project-target-molecule-formula').textContent = resolvedData.smiles;
+                fetchLiterature(literatureQuery);
+                fetchSynthesisPlan(identifier);
             }
         } catch (error) {
             alert(error.message);
             updateProgress(0);
         }
+    }
+
+    function resetUI() {
+        synthesisRoutesData = [];
+        literatureResults = [];
+        sourcingData = {};
+        currentTargetSMILES = '';
+        if (cy) {
+            cy.destroy();
+            cy = null;
+        }
+        document.getElementById('cy-knowledge-graph').innerHTML = '<p class="text-center text-gray-500 pt-16">Select a synthesis route to generate its knowledge graph.</p>';
+        routeContentContainer.innerHTML = '';
+        routeTabsContainer.innerHTML = '';
+        sourcingContent.innerHTML = '<p class="text-center text-gray-500 py-16">Perform a synthesis plan search to see material sourcing information.</p>';
+        costContent.innerHTML = '<p class="text-center text-gray-500 py-16">Perform a synthesis plan search to see cost analysis.</p>';
     }
 
     function handleNewRouteClick() {
@@ -106,7 +130,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     suggestion: suggestion,
-                    target_smiles: currentTargetSMILES
+                    target_smiles: currentTargetSMILES,
+                    existing_routes: synthesisRoutesData // Pass existing routes for context
                 }),
             });
             const data = await response.json();
@@ -115,7 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.new_route) {
                 addNewRouteToDisplay(data.new_route);
             } else {
-                throw new Error("API did not return a valid new route object.");
+                 throw new Error(data.error || "API did not return a valid new route object.");
             }
 
         } catch (error) {
@@ -134,23 +159,60 @@ document.addEventListener('DOMContentLoaded', function() {
         if (sortBy === 'date') {
             sortedResults.sort((a, b) => new Date(b.published) - new Date(a.published));
         } else if (sortBy === 'citations') {
+            // Assuming relevance_score is a proxy for citations/importance
             sortedResults.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
-        }
-        else {
+        } else {
+             // Default to original relevance sort
              sortedResults = [...literatureResults];
         }
-
         renderLiteratureResults(sortedResults);
     }
 
     function addNewRouteToDisplay(newRoute) {
-        newRoute.id = newRoute.id || `route_chemfm_${synthesisRoutesData.length}`;
+        // Ensure a unique ID for the new route
+        newRoute.id = newRoute.id || `route_chemfm_${Date.now()}`;
         synthesisRoutesData.push(newRoute);
-        fetchSourcingAndCost([newRoute]);
+        fetchSourcingAndCost([newRoute]); // Fetch sourcing just for the new route
         renderRouteTabs(synthesisRoutesData, newRoute.id);
         renderSingleRoute(newRoute);
+        // If knowledge tab is active, render the new graph
         if (document.querySelector('#main-tabs .tab-link[data-tab="knowledge"].border-blue-500')) {
             renderKnowledgeGraph(newRoute.id);
+        }
+    }
+
+    async function handleExpandReactant(smiles, targetContainerId, button) {
+        const container = document.getElementById(targetContainerId);
+        if (!container) return;
+
+        // Prevent multiple clicks
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+
+        try {
+            const response = await fetch('/api/plan_synthesis', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier: smiles }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
+
+            if (data.routes && data.routes.length > 0) {
+                // Render the best sub-route
+                renderSubRoute(data.routes[0], container);
+                button.style.display = 'none'; // Hide button after successful expansion
+            } else {
+                container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
+                button.style.display = 'none';
+            }
+
+        } catch (error) {
+            console.error('Error expanding synthesis tree:', error);
+            container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
+            button.disabled = false; // Re-enable button on failure
+            button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
         }
     }
 
@@ -199,7 +261,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateProgress(1);
         }
     }
-
+    
     async function fetchLiterature(query) {
         literatureResultsContainer.innerHTML = '<p class="text-center text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i>Searching literature...</p>';
         literatureResultsCount.textContent = 'Searching...';
@@ -221,10 +283,9 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error fetching literature results:', error);
             literatureResultsContainer.innerHTML = `<p class="text-center text-red-400">Failed to load literature: ${error.message}</p>`;
             literatureResultsCount.textContent = 'Literature Results (Error)';
-            updateProgress(0);
         }
     }
-
+    
     async function fetchSourcingAndCost(routes) {
         updateProgress(3, true);
         const analysisPromises = routes.map(route =>
@@ -248,6 +309,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         updateProgress(4);
+        
+        // After sourcing is done, refresh the active tab if it's sourcing/cost/knowledge
+        const activeMainTab = document.querySelector('#main-tabs .tab-link.border-blue-500');
+        const activeRouteTab = document.querySelector('.route-tab.border-blue-500');
+        if (activeMainTab && activeRouteTab) {
+            const tabName = activeMainTab.dataset.tab;
+            const routeId = activeRouteTab.dataset.routeId;
+            if (tabName === 'sourcing') renderSourcingInfo(routeId);
+            if (tabName === 'cost') renderCostAnalysis(routeId);
+            if (tabName === 'knowledge') renderKnowledgeGraph(routeId);
+        }
     }
 
     // --- UI Control and Rendering ---
@@ -259,7 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const tabName = clickedTab.dataset.tab;
 
-            document.querySelectorAll('.tab-link').forEach(tab => {
+            document.querySelectorAll('#main-tabs .tab-link').forEach(tab => {
                 tab.classList.remove('border-blue-500', 'text-blue-500');
                 tab.classList.add('border-transparent', 'text-gray-500');
             });
@@ -270,9 +342,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 content.classList.add('hidden');
             });
             const activeContent = document.getElementById(`${tabName}-content`);
-            activeContent.classList.remove('hidden');
+            if (activeContent) activeContent.classList.remove('hidden');
 
-            if (tabName === 'sourcing' || tabName === 'cost' || tabName === 'knowledge') {
+            if (['synthesis', 'sourcing', 'cost', 'knowledge'].includes(tabName)) {
                 const activeRouteTab = document.querySelector('.route-tab.border-blue-500');
                 if (activeRouteTab) {
                     const activeRouteId = activeRouteTab.dataset.routeId;
@@ -286,7 +358,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updateProgress(stage, isLoading = false) {
         const stages = ['Literature', 'Synthesis', 'Sourcing', 'Costing', 'Knowledge'];
-        let width = stage * 20;
+        let width = stage * 25; // 0, 25, 50, 75, 100
         progressBar.style.width = `${width}%`;
 
         let stepsHtml = '';
@@ -300,10 +372,11 @@ document.addEventListener('DOMContentLoaded', function() {
             stepsHtml += `<span class="${statusClass}">${name}</span>`;
         });
         progressStepsContainer.innerHTML = stepsHtml;
+        if(stage >= 4) updateProgress(5); // Complete knowledge stage
     }
 
     function renderRouteTabs(routes, activeRouteId) {
-        let tabsHtml = `<nav class="-mb-px flex space-x-8">`;
+        let tabsHtml = `<nav class="-mb-px flex space-x-8 overflow-x-auto">`;
         routes.forEach((route, index) => {
             const isHypothetical = route.id.includes('chemfm') || route.id.includes('hypothetical');
             const defaultName = isHypothetical ? `ChemFM Route ${index - (routes.length - 1) + 1}` : `Route ${String.fromCharCode(65 + index)}`;
@@ -311,7 +384,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
 
             const rawYield = route.overall_yield || 0;
-            const displayYield = rawYield > 1 ? rawYield : rawYield * 100;
+            // The yield is already a percentage from the backend
+            const displayYield = rawYield;
 
             tabsHtml += `<a href="#" class="${isActive} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm route-tab" data-route-id="${route.id}">
                             ${routeName} (${displayYield.toFixed(1)}% yield)
@@ -325,6 +399,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.preventDefault();
                 const routeId = this.dataset.routeId;
                 const routeData = synthesisRoutesData.find(r => r.id === routeId);
+                if (!routeData) return;
+
                 renderRouteTabs(synthesisRoutesData, routeId);
                 renderSingleRoute(routeData);
 
@@ -349,9 +425,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderRouteVisualization(route) {
-        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
         if (!route.steps || route.steps.length === 0) return '';
-
+        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
+        
         const firstReactants = route.steps[0].reactants;
         const reactantNames = firstReactants.map(r => r.formula || 'Reactant').join(' + ');
         vizHtml += `
@@ -382,19 +458,45 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderRouteDetails(steps) {
-        let detailsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">';
         if (!steps) return '';
-        steps.forEach(step => {
+        let detailsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">';
+        
+        steps.forEach((step, stepIndex) => {
             const imageHtml = step.reaction_image_url
                 ? `<div class="bg-white rounded-md p-2 mb-4"><img src="${step.reaction_image_url}" alt="Reaction diagram for step ${step.step_number}" class="w-full h-auto"/></div>`
                 : `<div class="bg-gray-800 rounded-md p-2 mb-4 text-center text-xs text-gray-500">Image not available</div>`;
 
+            // <<< NEW: Generate list of reactants with expand buttons >>>
+            const reactantsHtml = step.reactants.map((reactant, reactantIndex) => {
+                const subRouteContainerId = `sub-route-container-s${stepIndex}-r${reactantIndex}`;
+                // Only show expand button if it's not the final target molecule
+                const expandButton = reactant.smiles !== currentTargetSMILES
+                    ? `<button class="expand-reactant-btn text-blue-400 hover:text-blue-300 text-xs ml-2" 
+                                data-smiles="${reactant.smiles}" 
+                                data-target="${subRouteContainerId}">
+                           <i class="fas fa-search-plus mr-1"></i> Expand
+                       </button>`
+                    : '';
+
+                return `<li class="flex justify-between items-center py-1">
+                            <span class="font-mono text-xs">${reactant.formula}</span>
+                            ${expandButton}
+                        </li>
+                        <div id="${subRouteContainerId}" class="pl-4 border-l-2 border-gray-600 ml-2"></div>`;
+            }).join('');
+
             detailsHtml += `
                 <div class="bg-gray-700 rounded-lg p-4 flex flex-col">
                     <h4 class="font-bold mb-2">Step ${step.step_number}: ${step.title}</h4>
+                    <p class="text-sm text-gray-300 mb-3"><span class="font-medium">Conditions:</span> ${step.reagents_conditions}</p>
+                    
                     ${imageHtml}
+                    
                     <div class="flex-grow">
-                        <p class="text-sm text-gray-300 mb-3">${step.reagents_conditions}</p>
+                        <h5 class="text-sm font-semibold mb-2">Reactants:</h5>
+                        <ul class="text-sm text-gray-300 mb-3 space-y-1">
+                           ${reactantsHtml}
+                        </ul>
                         <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>
                         <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
                     </div>
@@ -404,8 +506,34 @@ document.addEventListener('DOMContentLoaded', function() {
         return detailsHtml;
     }
 
+    function renderSubRoute(subRoute, containerElement) {
+        if (!subRoute || !subRoute.steps || subRoute.steps.length === 0) {
+            containerElement.innerHTML = `<p class="text-xs text-gray-400 italic mt-2">Could not render sub-route.</p>`;
+            return;
+        }
+
+        let subRouteHtml = `<div class="mt-2 p-3 bg-gray-800 rounded-md">
+                               <h6 class="text-xs font-bold text-blue-300 mb-2">Sub-Synthesis (Overall Yield: ${subRoute.overall_yield.toFixed(1)}%)</h6>`;
+        
+        subRoute.steps.forEach((step, stepIndex) => {
+            const reactantsList = step.reactants.map(r => `<span class="font-mono">${r.formula}</span>`).join(' + ');
+            subRouteHtml += `
+                <div class="mb-2 last:mb-0">
+                    <p class="text-xs">
+                        <span class="text-gray-400">Sub-Step ${step.step_number}:</span>
+                        ${reactantsList} → ${step.product.formula}
+                        <span class="text-gray-500">(${(step.yield || 0).toFixed(1)}%)</span>
+                    </p>
+                </div>
+            `;
+        });
+        
+        subRouteHtml += `</div>`;
+        containerElement.innerHTML = subRouteHtml;
+    }
+    
     function renderRouteEvaluation(evaluation) {
-        if (!evaluation) return '';
+        if (!evaluation || (Object.keys(evaluation).length === 0)) return '';
         const advantages = (evaluation.advantages || []).map(adv => `<li class="flex items-start"><i class="fas fa-check-circle text-green-500 mt-1 mr-2 flex-shrink-0"></i><span>${adv}</span></li>`).join('');
         const challenges = (evaluation.challenges || []).map(chal => `<li class="flex items-start"><i class="fas fa-exclamation-triangle text-yellow-500 mt-1 mr-2 flex-shrink-0"></i><span>${chal}</span></li>`).join('');
         return `
@@ -432,11 +560,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         literatureResultsCount.textContent = `Literature Results (${papers.length} papers found)`;
-
         let html = '';
         papers.forEach(paper => {
             const renderedAbstract = marked.parse(paper.abstract || 'No abstract available.');
-
             html += `
                 <div class="bg-gray-700 rounded-lg p-4 mb-4 transition-shadow duration-300 hover:shadow-lg">
                     <div class="flex justify-between items-start">
@@ -444,7 +570,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <h4 class="font-bold text-blue-400 hover:text-blue-300">${paper.title}</h4>
                         </a>
                         <div class="flex items-center space-x-2 flex-shrink-0 ml-4">
-                             <span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded-full">Score: ${paper.relevance_score || 'N/A'}</span>
+                             <span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded-full">Score: ${(paper.relevance_score || 0).toFixed(2)}</span>
                         </div>
                     </div>
                      <p class="text-sm text-gray-400 mb-2">${paper.source}</p>
@@ -496,13 +622,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="overflow-x-auto">
                 <table class="w-full text-left">
                     <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
-                        <tr>
-                            <th class="p-4">Reagent</th>
-                            <th class="p-4">SMILES</th>
-                            <th class="p-4">Amount Required</th>
-                            <th class="p-4">Cheapest Supplier</th>
-                            <th class="p-4">Total Suppliers</th>
-                        </tr>
+                        <tr><th class="p-4">Reagent</th><th class="p-4">SMILES</th><th class="p-4">Amount Required</th><th class="p-4">Cheapest Supplier</th><th class="p-4">Total Suppliers</th></tr>
                     </thead>
                     <tbody class="text-sm">${tableRows}</tbody>
                 </table>
@@ -556,18 +676,13 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="overflow-x-auto">
                 <table class="w-full text-left">
                      <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
-                        <tr>
-                            <th class="p-4">Reagent</th>
-                            <th class="p-4">Amount Required</th>
-                            <th class="p-4">Cost per Gram</th>
-                            <th class="p-4">Subtotal</th>
-                        </tr>
+                        <tr><th class="p-4">Reagent</th><th class="p-4">Amount Required</th><th class="p-4">Cost per Gram</th><th class="p-4">Subtotal</th></tr>
                     </thead>
                     <tbody class="text-sm">${tableRows}</tbody>
                 </table>
             </div>`;
     }
-    
+
     function renderKnowledgeGraph(routeId) {
         const route = synthesisRoutesData.find(r => r.id === routeId);
         const sourcing = sourcingData[routeId];
@@ -577,48 +692,48 @@ document.addEventListener('DOMContentLoaded', function() {
             container.innerHTML = '<p class="text-center text-gray-500 pt-16">Sourcing and route data not yet available. Please wait for analysis to complete.</p>';
             return;
         }
+        if (cy) { cy.destroy(); } 
         container.innerHTML = '';
 
         let nodes = [];
+        let edges = [];
+        
         const finalProduct = route.steps[route.steps.length - 1].product;
+        // Add final product node
         nodes.push({ data: { id: finalProduct.smiles, label: finalProduct.formula, type: 'product' } });
 
-        let startingMaterials = new Set(Object.keys(sourcing.sourcing_details || {}));
-        route.steps.forEach(step => {
+        let startingMaterialsSMILES = new Set(Object.keys(sourcing.sourcing_details || {}));
+        
+        // Process steps to create nodes and edges
+        route.steps.forEach((step, i) => {
+            const reactionNodeId = `reaction_${route.id}_${step.step_number}`;
+            nodes.push({ data: { id: reactionNodeId, label: `Step ${step.step_number}`, type: 'reaction' } });
+            
+            // Link reactants to the reaction node
             step.reactants.forEach(reactant => {
-                const type = startingMaterials.has(reactant.smiles) ? 'start' : 'intermediate';
-                nodes.push({ data: { id: reactant.smiles, label: reactant.formula, type: type } });
+                const isStartingMaterial = startingMaterialsSMILES.has(reactant.smiles);
+                nodes.push({ data: { id: reactant.smiles, label: reactant.formula, type: isStartingMaterial ? 'start' : 'intermediate' } });
+                edges.push({ data: { source: reactant.smiles, target: reactionNodeId } });
             });
+
+            // Link reaction node to its product
             if (step.product.smiles !== finalProduct.smiles) {
                 nodes.push({ data: { id: step.product.smiles, label: step.product.formula, type: 'intermediate' } });
             }
-        });
-
-        for (const smiles in sourcing.sourcing_details) {
-            const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
-            if (cheapest) {
-                nodes.push({ data: { id: cheapest.vendor, label: cheapest.vendor, type: 'vendor' } });
-            }
-        }
-        nodes = Array.from(new Map(nodes.map(item => [item.data.id, item])).values());
-
-        let edges = [];
-        route.steps.forEach((step, i) => {
-            const reactionNodeId = `reaction_${route.id}_${i}`;
-            nodes.push({ data: { id: reactionNodeId, label: `Step ${step.step_number}`, type: 'reaction' } });
-            step.reactants.forEach(reactant => {
-                edges.push({ data: { source: reactant.smiles, target: reactionNodeId } });
-            });
             edges.push({ data: { source: reactionNodeId, target: step.product.smiles } });
         });
 
+        // Add supplier nodes and link them to starting materials
         for (const smiles in sourcing.sourcing_details) {
             const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
-            if (cheapest) {
+            if (cheapest && cheapest.vendor) {
+                nodes.push({ data: { id: cheapest.vendor, label: cheapest.vendor, type: 'vendor' } });
                 edges.push({ data: { source: smiles, target: cheapest.vendor, type: 'supplier' } });
             }
         }
 
+        nodes = Array.from(new Map(nodes.map(item => [item.data.id, item])).values());
+        
         cy = cytoscape({
             container: container,
             elements: { nodes, edges },
@@ -631,21 +746,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 { selector: 'node[type="vendor"]', style: { 'background-color': '#F59E0B', 'shape': 'round-rectangle', 'label': 'data(label)' } },
                 { selector: 'node[type="reaction"]', style: { 'background-color': '#9CA3AF', 'shape': 'rectangle', 'width': 30, 'height': 30 } },
                 { selector: 'edge[type="supplier"]', style: { 'line-style': 'dashed', 'line-color': '#F59E0B' } },
-                { selector: 'node.loading', style: { 'border-color': '#60A5FA', 'border-width': 4, 'border-style': 'double' } }
+                { selector: 'node.loading', style: { 'border-color': '#60A5FA', 'border-width': 4, 'border-style': 'double', 'transition-property': 'border-color, border-width', 'transition-duration': '0.5s' } }
             ],
-            layout: {
-                name: 'dagre',
-                rankDir: 'LR',
-                spacingFactor: 1.1
-            }
+            layout: { name: 'dagre', rankDir: 'LR', spacingFactor: 1.1 }
         });
 
-        // This is the restored click handler.
         cy.on('tap', 'node[type="start"]', async function(evt){
             const node = evt.target;
             const smiles = node.id();
 
-            if (node.hasClass('loading')) return;
+            if (node.hasClass('loading')) return; // Prevent multiple clicks
 
             console.log(`Expanding synthesis for starting material: ${smiles}`);
             node.addClass('loading');
@@ -661,12 +771,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
 
                 if (data.routes && data.routes.length > 0) {
-                    const subRoute = data.routes[0];
+                    const subRoute = data.routes[0]; // Take the best sub-route
                     expandGraphWithSubRoute(node, subRoute);
                 } else {
                     alert(`No further synthesis route could be found for ${smiles}. This is likely a stock material.`);
                 }
-
             } catch (error) {
                 console.error('Error expanding synthesis tree:', error);
                 alert(`Could not expand the synthesis tree: ${error.message}`);
@@ -675,15 +784,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        updateProgress(5);
+        updateProgress(5); // Mark Knowledge stage as complete
     }
     
-    // This is the restored helper function.
     function expandGraphWithSubRoute(clickedNode, subRoute) {
         if (!cy || !subRoute.steps || subRoute.steps.length === 0) {
             return;
         }
 
+        // Change the clicked node from a 'start' material to an 'intermediate'
         clickedNode.removeClass('start');
         clickedNode.removeStyle('cursor border-color border-width'); // Remove clickable styling
         clickedNode.data('type', 'intermediate');
@@ -692,25 +801,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
         subRoute.steps.forEach((step, i) => {
             const subReactionId = `sub_reaction_${clickedNode.id()}_${i}`;
-
-            newElements.push({ group: 'nodes', data: { id: subReactionId, label: `Sub-Step ${i + 1}`, type: 'reaction' } });
+            
+            // This reaction produces our (previously) starting material
+            newElements.push({ group: 'nodes', data: { id: subReactionId, label: `Sub ${i + 1}`, type: 'reaction' } });
+            // The product of this sub-reaction is the node we clicked
             newElements.push({ group: 'edges', data: { source: subReactionId, target: clickedNode.id() } });
-
+            
+            // Add the new reactants for this sub-reaction
             step.reactants.forEach(reactant => {
+                // Only add the node if it doesn't already exist in the graph
                 if (cy.getElementById(reactant.smiles).empty()) {
                     newElements.push({
                         group: 'nodes',
                         data: {
                             id: reactant.smiles,
                             label: reactant.formula,
-                            type: 'start' // These are the new starting materials
+                            type: 'start' // These are the NEW starting materials, making them clickable
                         }
                     });
                 }
+                 // Connect the new reactant to the sub-reaction
                 newElements.push({ group: 'edges', data: { source: reactant.smiles, target: subReactionId } });
             });
         });
 
+        // Add the new elements and re-run the layout
         cy.add(newElements);
         cy.layout({
             name: 'dagre',

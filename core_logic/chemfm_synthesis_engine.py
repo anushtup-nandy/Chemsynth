@@ -88,7 +88,7 @@ def generate_route_with_chemfm(target_smiles: str, user_suggestion: str) -> dict
         inputs = tokenizer(
             retrosynthesis_prompt, 
             return_tensors="pt", 
-            add_special_tokens=False  # <-- MODIFIED
+            add_special_tokens=False 
         ).to(_device)
 
         with torch.no_grad():
@@ -99,9 +99,8 @@ def generate_route_with_chemfm(target_smiles: str, user_suggestion: str) -> dict
                 num_beams=5,
                 early_stopping=True,
                 num_return_sequences=1,
-                # ADDED: Parameters to prevent the model from getting stuck in repetitive loops.
-                repetition_penalty=1.2,       # <-- ADDED: Penalize repeating tokens.
-                no_repeat_ngram_size=3        # <-- ADDED: Prevent repeating sequences of 3 tokens.
+                repetition_penalty=1.2,       
+                no_repeat_ngram_size=3  
             )
         
         raw_prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
