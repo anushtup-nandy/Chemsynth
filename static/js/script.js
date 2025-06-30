@@ -3,9 +3,9 @@
 // Global variables
 let synthesisRoutesData = [];
 let literatureResults = [];
-let sourcingData = {}; 
-let currentTargetSMILES = ''; 
-let cy; 
+let sourcingData = {};
+let currentTargetSMILES = '';
+let cy;
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const literatureResultsContainer = document.getElementById('literature-results-container');
     const literatureResultsCount = document.getElementById('literature-results-count');
     const literatureSortSelect = document.getElementById('literature-sort-select');
-    
+
     const synthesisContent = document.getElementById('synthesis-content');
     const sourcingContent = document.getElementById('sourcing-content');
     const costContent = document.getElementById('cost-content');
@@ -30,25 +30,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressStepsContainer = document.getElementById('project-progress-steps');
     const mainTabs = document.getElementById('main-tabs');
 
-    // --- MODIFIED: Selectors for the new modal ---
     const newRouteModal = document.getElementById('new-route-modal');
     const cancelNewRouteBtn = document.getElementById('cancel-new-route-btn');
     const submitNewRouteBtn = document.getElementById('submit-new-route-btn');
     const newRouteSuggestionInput = document.getElementById('new-route-suggestion-input');
 
-
     // --- Initial State Setup ---
-    updateProgress(0); 
+    updateProgress(0);
     setupTabControls();
 
     // --- Event Listeners ---
     searchButton.addEventListener('click', handleSearch);
     literatureSortSelect.addEventListener('change', handleSortLiterature);
-
-    // --- MODIFIED: Event listeners for the new modal ---
-    newRouteButton.addEventListener('click', handleNewRouteClick); // Changed function name
+    newRouteButton.addEventListener('click', handleNewRouteClick);
     cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
-    submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit); // Changed function name
+    submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit);
 
     // --- Main Handler Functions ---
     async function handleSearch(event) {
@@ -61,38 +57,33 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        updateProgress(0, true); 
-        
+        updateProgress(0, true);
+
         try {
             const resolvedData = await resolveIdentifier(identifier);
             if (resolvedData) {
                 const literatureQuery = (resolvedData.name + ' ' + keywords).trim();
-                currentTargetSMILES = resolvedData.smiles; // Save the SMILES for later use
+                currentTargetSMILES = resolvedData.smiles;
                 fetchLiterature(literatureQuery);
-                fetchSynthesisPlan(identifier); 
+                fetchSynthesisPlan(identifier);
                 document.getElementById('project-target-molecule-name').textContent = `Target: ${resolvedData.name}`;
                 document.getElementById('project-target-molecule-formula').textContent = resolvedData.smiles;
             }
         } catch (error) {
             alert(error.message);
-            updateProgress(0); 
+            updateProgress(0);
         }
     }
 
-    // --- REFACTORED: New route handling logic ---
-
-    // 1. This function is called when the main "New Route" button is clicked. It just shows the modal.
     function handleNewRouteClick() {
         if (!currentTargetSMILES) {
             alert("Please perform a search for a target molecule first.");
             return;
         }
-        // Show the modal
         newRouteModal.classList.remove('hidden');
         newRouteSuggestionInput.focus();
     }
 
-    // 2. This function is called when the "Generate Route" button inside the modal is clicked.
     async function handleNewRouteSubmit() {
         const suggestion = newRouteSuggestionInput.value.trim();
         if (!suggestion) {
@@ -100,15 +91,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Hide the modal and clear the input for next time
         newRouteModal.classList.add('hidden');
         newRouteSuggestionInput.value = '';
-
-        // Trigger the API call
         generateNewRouteApiCall(suggestion);
     }
-    
-    // 3. This function contains the actual API call logic, separated for clarity.
+
     async function generateNewRouteApiCall(suggestion) {
         newRouteButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Generating...';
         newRouteButton.disabled = true;
@@ -119,19 +106,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     suggestion: suggestion,
-                    target_smiles: currentTargetSMILES // Use the globally stored SMILES
+                    target_smiles: currentTargetSMILES
                 }),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to generate new route.');
-            
-            // The API now returns { "new_route": {...} }
+
             if (data.new_route) {
                 addNewRouteToDisplay(data.new_route);
             } else {
                 throw new Error("API did not return a valid new route object.");
             }
-            
+
         } catch (error) {
             console.error('Error generating new route:', error);
             alert(`Error: ${error.message}`);
@@ -140,7 +126,6 @@ document.addEventListener('DOMContentLoaded', function() {
             newRouteButton.disabled = false;
         }
     }
-
 
     function handleSortLiterature() {
         const sortBy = literatureSortSelect.value;
@@ -154,14 +139,14 @@ document.addEventListener('DOMContentLoaded', function() {
         else {
              sortedResults = [...literatureResults];
         }
-        
+
         renderLiteratureResults(sortedResults);
     }
 
     function addNewRouteToDisplay(newRoute) {
         newRoute.id = newRoute.id || `route_chemfm_${synthesisRoutesData.length}`;
         synthesisRoutesData.push(newRoute);
-        fetchSourcingAndCost([newRoute]); 
+        fetchSourcingAndCost([newRoute]);
         renderRouteTabs(synthesisRoutesData, newRoute.id);
         renderSingleRoute(newRoute);
         if (document.querySelector('#main-tabs .tab-link[data-tab="knowledge"].border-blue-500')) {
@@ -169,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // --- API Fetching Functions (No changes needed from here down) ---
+    // --- API Fetching Functions ---
     async function resolveIdentifier(identifier) {
         const response = await fetch('/api/resolve_identifier', {
             method: 'POST',
@@ -187,22 +172,22 @@ document.addEventListener('DOMContentLoaded', function() {
         synthesisContent.classList.remove('hidden');
         routeTabsContainer.innerHTML = '';
         routeContentContainer.innerHTML = '<p class="text-center text-gray-400 py-8"><i class="fas fa-spinner fa-spin mr-2"></i>Resolving identifier and planning routes...</p>';
-        
+
         try {
             const response = await fetch('/api/plan_synthesis', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ identifier: identifier }),
             });
-            
+
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "An unknown error occurred.");
-            
+
             if (data.routes && data.routes.length > 0) {
                 synthesisRoutesData = data.routes;
                 renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
                 renderSingleRoute(synthesisRoutesData[0]);
-                updateProgress(2); 
+                updateProgress(2);
                 fetchSourcingAndCost(synthesisRoutesData);
             } else {
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
@@ -241,7 +226,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function fetchSourcingAndCost(routes) {
-        updateProgress(3, true); 
+        updateProgress(3, true);
         const analysisPromises = routes.map(route =>
             fetch('/api/analyze_sourcing', {
                 method: 'POST',
@@ -261,11 +246,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 sourcingData[result.routeId] = { error: "Failed to load analysis for this route." };
             }
         });
-        
-        updateProgress(4); 
+
+        updateProgress(4);
     }
-    
-    // --- UI Control and Rendering (No changes needed below this line) ---
+
+    // --- UI Control and Rendering ---
     function setupTabControls() {
         mainTabs.addEventListener('click', (e) => {
             e.preventDefault();
@@ -298,7 +283,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     function updateProgress(stage, isLoading = false) {
         const stages = ['Literature', 'Synthesis', 'Sourcing', 'Costing', 'Knowledge'];
         let width = stage * 20;
@@ -306,7 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let stepsHtml = '';
         stages.forEach((name, index) => {
-            let statusClass = 'text-gray-500'; 
+            let statusClass = 'text-gray-500';
             if (index < stage) {
                 statusClass = 'text-green-400';
             } else if (index === stage) {
@@ -324,7 +309,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const defaultName = isHypothetical ? `ChemFM Route ${index - (routes.length - 1) + 1}` : `Route ${String.fromCharCode(65 + index)}`;
             const routeName = route.name || defaultName;
             const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
-            
+
             const rawYield = route.overall_yield || 0;
             const displayYield = rawYield > 1 ? rawYield : rawYield * 100;
 
@@ -366,7 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderRouteVisualization(route) {
         let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
         if (!route.steps || route.steps.length === 0) return '';
-        
+
         const firstReactants = route.steps[0].reactants;
         const reactantNames = firstReactants.map(r => r.formula || 'Reactant').join(' + ');
         vizHtml += `
@@ -445,9 +430,9 @@ document.addEventListener('DOMContentLoaded', function() {
             literatureResultsCount.textContent = 'Literature Results (0 papers found)';
             return;
         }
-        
+
         literatureResultsCount.textContent = `Literature Results (${papers.length} papers found)`;
-        
+
         let html = '';
         papers.forEach(paper => {
             const renderedAbstract = marked.parse(paper.abstract || 'No abstract available.');
@@ -490,7 +475,7 @@ document.addEventListener('DOMContentLoaded', function() {
         for (const smiles in details) {
             const reagent = details[smiles];
             const cheapest = reagent.cheapest_option;
-            const supplierInfo = cheapest 
+            const supplierInfo = cheapest
                 ? `${cheapest.vendor} (${formatCurrency(cheapest.price_per_g)}/g)`
                 : '<span class="text-yellow-400">Not Found</span>';
 
@@ -592,7 +577,7 @@ document.addEventListener('DOMContentLoaded', function() {
             container.innerHTML = '<p class="text-center text-gray-500 pt-16">Sourcing and route data not yet available. Please wait for analysis to complete.</p>';
             return;
         }
-        container.innerHTML = ''; 
+        container.innerHTML = '';
 
         let nodes = [];
         const finalProduct = route.steps[route.steps.length - 1].product;
@@ -608,7 +593,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 nodes.push({ data: { id: step.product.smiles, label: step.product.formula, type: 'intermediate' } });
             }
         });
-        
+
         for (const smiles in sourcing.sourcing_details) {
             const cheapest = sourcing.sourcing_details[smiles].cheapest_option;
             if (cheapest) {
@@ -641,11 +626,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 { selector: 'node', style: { 'label': 'data(label)', 'color': '#CBD5E0', 'font-size': '12px', 'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': '5px', 'background-color': '#4A5568' } },
                 { selector: 'edge', style: { 'width': 2, 'line-color': '#4A5568', 'target-arrow-color': '#4A5568', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
                 { selector: 'node[type="product"]', style: { 'background-color': '#3B82F6', 'shape': 'diamond', 'width': 60, 'height': 60 } },
-                { selector: 'node[type="start"]', style: { 'background-color': '#10B981', 'shape': 'ellipse' } },
+                { selector: 'node[type="start"]', style: { 'background-color': '#10B981', 'shape': 'ellipse', 'cursor': 'pointer', 'border-color': '#A7F3D0', 'border-width': 2 } },
                 { selector: 'node[type="intermediate"]', style: { 'background-color': '#6366F1', 'shape': 'ellipse' } },
                 { selector: 'node[type="vendor"]', style: { 'background-color': '#F59E0B', 'shape': 'round-rectangle', 'label': 'data(label)' } },
                 { selector: 'node[type="reaction"]', style: { 'background-color': '#9CA3AF', 'shape': 'rectangle', 'width': 30, 'height': 30 } },
                 { selector: 'edge[type="supplier"]', style: { 'line-style': 'dashed', 'line-color': '#F59E0B' } },
+                { selector: 'node.loading', style: { 'border-color': '#60A5FA', 'border-width': 4, 'border-style': 'double' } }
             ],
             layout: {
                 name: 'dagre',
@@ -653,9 +639,88 @@ document.addEventListener('DOMContentLoaded', function() {
                 spacingFactor: 1.1
             }
         });
-        updateProgress(5); 
+
+        // This is the restored click handler.
+        cy.on('tap', 'node[type="start"]', async function(evt){
+            const node = evt.target;
+            const smiles = node.id();
+
+            if (node.hasClass('loading')) return;
+
+            console.log(`Expanding synthesis for starting material: ${smiles}`);
+            node.addClass('loading');
+
+            try {
+                const response = await fetch('/api/plan_synthesis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identifier: smiles }),
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
+
+                if (data.routes && data.routes.length > 0) {
+                    const subRoute = data.routes[0];
+                    expandGraphWithSubRoute(node, subRoute);
+                } else {
+                    alert(`No further synthesis route could be found for ${smiles}. This is likely a stock material.`);
+                }
+
+            } catch (error) {
+                console.error('Error expanding synthesis tree:', error);
+                alert(`Could not expand the synthesis tree: ${error.message}`);
+            } finally {
+                node.removeClass('loading');
+            }
+        });
+
+        updateProgress(5);
     }
     
+    // This is the restored helper function.
+    function expandGraphWithSubRoute(clickedNode, subRoute) {
+        if (!cy || !subRoute.steps || subRoute.steps.length === 0) {
+            return;
+        }
+
+        clickedNode.removeClass('start');
+        clickedNode.removeStyle('cursor border-color border-width'); // Remove clickable styling
+        clickedNode.data('type', 'intermediate');
+
+        const newElements = [];
+
+        subRoute.steps.forEach((step, i) => {
+            const subReactionId = `sub_reaction_${clickedNode.id()}_${i}`;
+
+            newElements.push({ group: 'nodes', data: { id: subReactionId, label: `Sub-Step ${i + 1}`, type: 'reaction' } });
+            newElements.push({ group: 'edges', data: { source: subReactionId, target: clickedNode.id() } });
+
+            step.reactants.forEach(reactant => {
+                if (cy.getElementById(reactant.smiles).empty()) {
+                    newElements.push({
+                        group: 'nodes',
+                        data: {
+                            id: reactant.smiles,
+                            label: reactant.formula,
+                            type: 'start' // These are the new starting materials
+                        }
+                    });
+                }
+                newElements.push({ group: 'edges', data: { source: reactant.smiles, target: subReactionId } });
+            });
+        });
+
+        cy.add(newElements);
+        cy.layout({
+            name: 'dagre',
+            rankDir: 'LR',
+            spacingFactor: 1.1,
+            animate: true,
+            animationDuration: 500
+        }).run();
+    }
+
     function formatCurrency(value) {
         if (typeof value !== 'number') return '$0.00';
         return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
