@@ -43,13 +43,23 @@ document.addEventListener('DOMContentLoaded', function() {
     newRouteButton.addEventListener('click', handleNewRouteClick);
     cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
     submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit);
+    // routeContentContainer.addEventListener('click', function(e) {
+    //     if (e.target.matches('.expand-reactant-btn')) {
+    //         e.preventDefault();
+    //         const button = e.target;
+    //         const smiles = button.dataset.smiles;
+    //         const targetContainerId = button.dataset.target;
+    //         handleExpandReactant(smiles, targetContainerId, button);
+    //     }
+    // });
+
     routeContentContainer.addEventListener('click', function(e) {
-        if (e.target.matches('.expand-reactant-btn')) {
+        const expandableBox = e.target.closest('.expandable-molecule');
+        if (expandableBox) {
             e.preventDefault();
-            const button = e.target;
-            const smiles = button.dataset.smiles;
-            const targetContainerId = button.dataset.target;
-            handleExpandReactant(smiles, targetContainerId, button);
+            const smiles = expandableBox.dataset.smiles;
+            const targetContainerId = expandableBox.dataset.targetId;
+            handleExpandVisualization(smiles, targetContainerId, expandableBox);
         }
     });
 
@@ -181,13 +191,47 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function handleExpandReactant(smiles, targetContainerId, button) {
-        const container = document.getElementById(targetContainerId);
-        if (!container) return;
+    // async function handleExpandReactant(smiles, targetContainerId, button) {
+    //     const container = document.getElementById(targetContainerId);
+    //     if (!container) return;
 
-        // Prevent multiple clicks
-        button.disabled = true;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+    //     // Prevent multiple clicks
+    //     button.disabled = true;
+    //     button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+
+    //     try {
+    //         const response = await fetch('/api/plan_synthesis', {
+    //             method: 'POST',
+    //             headers: { 'Content-Type': 'application/json' },
+    //             body: JSON.stringify({ identifier: smiles }),
+    //         });
+
+    //         const data = await response.json();
+    //         if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
+
+    //         if (data.routes && data.routes.length > 0) {
+    //             // Render the best sub-route
+    //             renderSubRoute(data.routes[0], container);
+    //             button.style.display = 'none'; // Hide button after successful expansion
+    //         } else {
+    //             container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
+    //             button.style.display = 'none';
+    //         }
+
+    //     } catch (error) {
+    //         console.error('Error expanding synthesis tree:', error);
+    //         container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
+    //         button.disabled = false; // Re-enable button on failure
+    //         button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
+    //     }
+    // }
+
+    async function handleExpandVisualization(smiles, targetContainerId, clickedBox) {
+        const container = document.getElementById(targetContainerId);
+        if (!container || clickedBox.classList.contains('is-expanded')) return;
+
+        clickedBox.classList.add('is-loading'); // Visual feedback
+        clickedBox.classList.remove('expandable-molecule'); // Prevent re-clicks
 
         try {
             const response = await fetch('/api/plan_synthesis', {
@@ -195,26 +239,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ identifier: smiles }),
             });
-
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
 
             if (data.routes && data.routes.length > 0) {
-                // Render the best sub-route
-                renderSubRoute(data.routes[0], container);
-                button.style.display = 'none'; // Hide button after successful expansion
+                renderSubRouteVisualization(data.routes[0], container);
             } else {
-                container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
-                button.style.display = 'none';
+                container.innerHTML = `<p class="text-xs text-green-400 italic mt-2 text-center">Stock Material</p>`;
             }
-
+            clickedBox.classList.add('is-expanded');
         } catch (error) {
-            console.error('Error expanding synthesis tree:', error);
-            container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
-            button.disabled = false; // Re-enable button on failure
-            button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
+            console.error('Error expanding synthesis viz:', error);
+            container.innerHTML = `<p class="text-xs text-red-400 italic mt-2 text-center">Error: ${error.message}</p>`;
+            clickedBox.classList.add('expandable-molecule'); // Allow retry on error
+        } finally {
+            clickedBox.classList.remove('is-loading');
         }
     }
+
 
     // --- API Fetching Functions ---
     async function resolveIdentifier(identifier) {
@@ -424,37 +466,153 @@ document.addEventListener('DOMContentLoaded', function() {
         routeContentContainer.innerHTML = contentHtml;
     }
 
+    // function renderRouteVisualization(route) {
+    //     if (!route.steps || route.steps.length === 0) return '';
+    //     let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
+        
+    //     const firstReactants = route.steps[0].reactants;
+    //     const reactantNames = firstReactants.map(r => r.formula || 'Reactant').join(' + ');
+    //     vizHtml += `
+    //         <div class="molecule-display flex-shrink-0">
+    //             <div class="text-center p-4">
+    //                 <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
+    //                 <div class="font-bold">${reactantNames}</div>
+    //             </div>
+    //         </div>`;
+
+    //     route.steps.forEach(step => {
+    //         const isFinalProduct = step.product.smiles === currentTargetSMILES;
+    //         const borderColor = isFinalProduct ? 'border-2 border-blue-500' : '';
+    //         const textColor = isFinalProduct ? 'text-blue-400' : '';
+    //         const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
+    //         vizHtml += `
+    //             <div class="reaction-arrow flex-shrink-0 mx-4 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
+    //             <div class="molecule-display ${borderColor} flex-shrink-0">
+    //                 <div class="text-center p-4">
+    //                     <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
+    //                     <div class="font-bold ${textColor}">${titleText}</div>
+    //                     <div class="text-xs text-gray-400 mt-1">${step.product.formula}</div>
+    //                 </div>
+    //             </div>`;
+    //     });
+    //     vizHtml += '</div></div>';
+    //     return vizHtml;
+    // }
+
     function renderRouteVisualization(route) {
         if (!route.steps || route.steps.length === 0) return '';
-        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
         
-        const firstReactants = route.steps[0].reactants;
-        const reactantNames = firstReactants.map(r => r.formula || 'Reactant').join(' + ');
-        vizHtml += `
-            <div class="molecule-display flex-shrink-0">
-                <div class="text-center p-4">
-                    <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
-                    <div class="font-bold">${reactantNames}</div>
-                </div>
-            </div>`;
+        let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-start justify-start mb-8 overflow-x-auto p-4">';
+        
+        // This is the main wrapper for each step's visualization block
+        const renderStepBlock = (step, isInitial = false) => {
+            const product = step.product;
+            const reactants = step.reactants;
+            const isFinalProduct = product.smiles === currentTargetSMILES;
+            const containerId = `sub-viz-${route.id}-${step.step_number}`;
 
-        route.steps.forEach(step => {
-            const isFinalProduct = step.product.smiles === currentTargetSMILES;
+            let blockHtml = '';
+
+            // Render the starting material(s) box only for the very first step
+            if (isInitial) {
+                const reactantNames = reactants.map(r => r.formula || 'Reactant').join(' + ');
+                const initialReactantSmiles = reactants.map(r => r.smiles).join('.'); // Join for potential multi-reactant expansion
+                
+                blockHtml += `
+                <div class="flex flex-col items-center">
+                    <div class="molecule-display flex-shrink-0 expandable-molecule" 
+                         data-smiles="${initialReactantSmiles}" 
+                         data-target-id="sub-viz-${route.id}-initial">
+                        <div class="text-center p-4">
+                            <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
+                            <div class="font-bold">${reactantNames}</div>
+                        </div>
+                    </div>
+                    <div id="sub-viz-${route.id}-initial" class="w-full mt-2"></div>
+                </div>`;
+            }
+
+            // Render the arrow and the product box for the current step
+            const expandableClass = isFinalProduct ? '' : 'expandable-molecule';
             const borderColor = isFinalProduct ? 'border-2 border-blue-500' : '';
             const textColor = isFinalProduct ? 'text-blue-400' : '';
             const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
-            vizHtml += `
-                <div class="reaction-arrow flex-shrink-0 mx-4 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
-                <div class="molecule-display ${borderColor} flex-shrink-0">
-                    <div class="text-center p-4">
-                        <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
-                        <div class="font-bold ${textColor}">${titleText}</div>
-                        <div class="text-xs text-gray-400 mt-1">${step.product.formula}</div>
+
+            blockHtml += `
+                <div class="reaction-arrow flex-shrink-0 mx-4 self-center"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
+                <div class="flex flex-col items-center">
+                    <div class="molecule-display ${borderColor} ${expandableClass} flex-shrink-0" 
+                         data-smiles="${product.smiles}" 
+                         data-target-id="${containerId}">
+                        <div class="text-center p-4">
+                            <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
+                            <div class="font-bold ${textColor}">${titleText}</div>
+                            <div class="text-xs text-gray-400 mt-1">${product.formula}</div>
+                        </div>
                     </div>
+                    <div id="${containerId}" class="w-full mt-2"></div>
                 </div>`;
-        });
+            
+            return blockHtml;
+        };
+
+        // Build the complete visualization
+        vizHtml += renderStepBlock(route.steps[0], true); // Render the first step which includes the initial reactant
+        for (let i = 1; i < route.steps.length; i++) {
+            vizHtml += renderStepBlock(route.steps[i]);
+        }
+        
         vizHtml += '</div></div>';
         return vizHtml;
+    }
+
+    function renderSubRouteVisualization(subRoute, containerElement) {
+        if (!subRoute || !subRoute.steps || subRoute.steps.length === 0) {
+            containerElement.innerHTML = `<p class="text-xs text-gray-400 italic mt-2">Could not render sub-route.</p>`;
+            return;
+        }
+
+        let subVizHtml = '<div class="flex items-start justify-center p-3 bg-gray-900 bg-opacity-50 rounded-md border border-gray-700">';
+
+        // Starting material for the sub-route
+        const initialReactants = subRoute.steps[0].reactants;
+        const reactantNames = initialReactants.map(r => r.formula).join(' + ');
+        const initialReactantSmiles = initialReactants.map(r => r.smiles).join('.');
+        
+        subVizHtml += `
+            <div class="flex flex-col items-center">
+                <div class="molecule-display-sm expandable-molecule" 
+                     data-smiles="${initialReactantSmiles}" 
+                     data-target-id="sub-viz-${subRoute.id}-initial">
+                     <div class="text-center p-2">
+                        <div class="font-bold text-xs">${reactantNames}</div>
+                     </div>
+                </div>
+                <div id="sub-viz-${subRoute.id}-initial" class="w-full mt-2"></div>
+            </div>`;
+
+        // Each step in the sub-route
+        subRoute.steps.forEach(step => {
+            const product = step.product;
+            const containerId = `sub-viz-${subRoute.id}-${step.step_number}`;
+            
+            subVizHtml += `
+            <div class="reaction-arrow flex-shrink-0 mx-2 self-center"><i class="fas fa-long-arrow-alt-right text-lg text-gray-600"></i></div>
+            <div class="flex flex-col items-center">
+                <div class="molecule-display-sm expandable-molecule" 
+                     data-smiles="${product.smiles}"
+                     data-target-id="${containerId}">
+                    <div class="text-center p-2">
+                        <div class="text-xs text-gray-400">Yield: ${(step.yield || 0).toFixed(0)}%</div>
+                        <div class="font-bold text-xs">${product.formula}</div>
+                    </div>
+                </div>
+                <div id="${containerId}" class="w-full mt-2"></div>
+            </div>`;
+        });
+
+        subVizHtml += '</div>';
+        containerElement.innerHTML = subVizHtml;
     }
 
     function renderRouteDetails(steps) {

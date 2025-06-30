@@ -477,3 +477,37 @@ img {
 .graph-node {
     transition: all 0.3s ease;
 }
+
+.molecule-display.expandable-molecule,
+.molecule-display-sm.expandable-molecule {
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.molecule-display.expandable-molecule:hover,
+.molecule-display-sm.expandable-molecule:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5); /* Blue glow */
+    border-color: #3B82F6;
+}
+
+.molecule-display.is-loading,
+.molecule-display-sm.is-loading {
+    border: 2px dashed #3B82F6;
+    animation: pulse-border 1.5s infinite;
+}
+
+.molecule-display.is-expanded {
+    background-color: #4B5563; /* Darken slightly to show it's "done" */
+}
+
+@keyframes pulse-border {
+    0% { border-color: #3B82F6; }
+    50% { border-color: #93C5FD; }
+    100% { border-color: #3B82F6; }
+}
+
+/* A smaller version for sub-routes */
+.molecule-display-sm {
+    @apply bg-gray-700 rounded-lg p-1 border border-gray-600;
+}
