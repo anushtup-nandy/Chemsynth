@@ -1,4 +1,3 @@
-# chem_mvp/core_logic/synthesis_planner.py
 import os
 import json
 import logging
@@ -10,8 +9,8 @@ from utils.llm_interface import generate_text
 from utils.prompt_loader import format_prompt
 from utils.reaction_utils import map_reaction, generate_reaction_image
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
+from utils.yield_optimizer import AdvancedYieldPredictor
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -157,12 +156,43 @@ def initialize_aizynthfinder(config_path: str) -> dict:
     except Exception as e:
         logger.error(f"Error initializing AiZynthFinder: {e}", exc_info=True)
         return {"finder": None, "error": f"An unexpected error occurred during AiZynthFinder initialization: {str(e)}"}
+    
+def initialize_yield_predictor() -> AdvancedYieldPredictor | None:
+    """
+    Initialize the Advanced Yield Predictor with proper error handling.
+    Returns the predictor instance or None if initialization fails.
+    """
+    try:
+        this_dir = os.path.dirname(__file__)
+        # Update these paths to match your actual model locations
+        CONDITION_MODEL_PATH = os.path.join(this_dir, '..', 'models', 'model 2')
+        YIELD_MODEL_PATH = os.path.join(this_dir, '..', 'models', 'model')
+        
+        # Check if model directories exist
+        if not os.path.exists(CONDITION_MODEL_PATH):
+            logger.warning(f"Condition model path not found: {CONDITION_MODEL_PATH}")
+            return None
+        if not os.path.exists(YIELD_MODEL_PATH):
+            logger.warning(f"Yield model path not found: {YIELD_MODEL_PATH}")
+            return None
+        
+        logger.info("Initializing Advanced Yield Predictor...")
+        predictor = AdvancedYieldPredictor(
+            condition_model_dir=CONDITION_MODEL_PATH,
+            yield_model_dir=YIELD_MODEL_PATH,
+            cuda_device=-1  # Use CPU for now
+        )
+        logger.info("Advanced Yield Predictor initialized successfully")
+        return predictor
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize Advanced Yield Predictor: {e}", exc_info=True)
+        return None
 
-# --- Main Synthesis Planning Logic (FIXED) ---
 def plan_synthesis_route(target_identifier: str) -> dict:
     """
     Plans synthesis routes for a target molecule using AiZynthFinder
-    and elaborates the steps using an LLM.
+    and elaborates the steps using an LLM with advanced yield prediction.
     """
     target_smiles = resolve_molecule_identifier(target_identifier)
     if not target_smiles:
@@ -175,6 +205,11 @@ def plan_synthesis_route(target_identifier: str) -> dict:
             return {"error": f"AiZynthFinder config.yml not found at {config_path}"}
     except Exception as e:
         return {"error": f"Could not determine project path: {e}"}
+
+    # Initialize Advanced Yield Predictor
+    yield_predictor = initialize_yield_predictor()
+    if yield_predictor is None:
+        logger.warning("Advanced Yield Predictor not available, falling back to basic yield calculation")
 
     try:
         # Initialize AiZynthFinder from the config file
@@ -218,7 +253,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
              return {"error": f"AiZynthFinder Error: A specified policy or stock name in the config is unknown. Details: {e}"}
         return {"error": f"Failed to run synthesis planning: {str(e)}"}
 
-    # --- FIXED Route Processing Logic ---
+    # --- MODIFIED Route Processing Logic with Advanced Yield Prediction ---
     routes_data = []
     try:
         # Helper function to get route score
@@ -278,8 +313,6 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                 if reaction_tree is None:
                     logger.warning(f"No reaction tree found for route {index}")
                     continue
-                
-                # FIXED: Check if reaction_tree has reactions method before calling it
                 if hasattr(reaction_tree, 'reactions') and callable(getattr(reaction_tree, 'reactions')):
                     reaction_steps = list(reaction_tree.reactions())
                 else:
@@ -290,12 +323,9 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                 logger.warning(f"Could not extract reactions from route {index}: {e}")
                 continue
 
-            # <<< NEW LOGIC: Calculate an averaged per-step yield as a fallback >>>
-            num_steps = len(reaction_steps)
-            avg_step_yield_fraction = 0.0
-            if num_steps > 0 and route_score > 0:
-                # Calculate geometric mean of the overall score to distribute it among steps
-                avg_step_yield_fraction = route_score**(1 / num_steps)
+            # Collect all reaction SMILES for batch yield prediction
+            reaction_smiles_list = []
+            step_metadata = []
             
             for step_index, reaction in enumerate(reversed(reaction_steps)):
                 try:
@@ -305,48 +335,126 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     if not reactants_smiles or not product_smiles: 
                         continue
                     
-                    # <<< MODIFIED: Robust yield calculation >>>
-                    # First, try to get the specific score from metadata.
-                    yield_fraction = reaction.metadata.get('plausibility', reaction.metadata.get('template_score', 0.0))
-                    
-                    # If metadata score is 0, use the calculated average as a fallback.
-                    if yield_fraction == 0.0 and avg_step_yield_fraction > 0.0:
-                        logger.info(f"Step {step_index+1}: Metadata yield not found. Falling back to averaged yield.")
-                        yield_fraction = avg_step_yield_fraction
-                        
-                    yield_value = yield_fraction * 100
-                    
                     reaction_smiles_str = f"{'.'.join(reactants_smiles)}>>{product_smiles}"
-                    step_details = {"title": "Reaction", "conditions": "N/A", "notes": "N/A"}
-                    
-                    step_id = f"{route_id}_step_{step_index + 1}"
-                    image_url = generate_reaction_image(reaction_smiles_str, step_id)
-
-                    try:
-                        elaboration_prompt = format_prompt("elaborate_synthesis_step", reaction_smiles=reaction_smiles_str)
-                        if elaboration_prompt:
-                            llm_response = generate_text(elaboration_prompt, temperature=0.5)
-                            if llm_response:
-                                cleaned_response = llm_response.strip().replace('```json', '').replace('```', '').strip()
-                                step_details = json.loads(cleaned_response)
-                    except Exception as e:
-                        logger.warning(f"LLM elaboration failed for step {step_index}: {e}")
-
-                    route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.1f}%)")
-
-                    route_info["steps"].append({
-                        "step_number": step_index + 1,
-                        "title": step_details.get("title", "Unnamed Reaction"),
-                        "yield": yield_value,
-                        "reagents_conditions": step_details.get("conditions", "Not specified"),
-                        "source_notes": step_details.get("notes", "No specific notes available."),
-                        "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
-                        "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
-                        "reaction_image_url": image_url 
+                    reaction_smiles_list.append(reaction_smiles_str)
+                    step_metadata.append({
+                        'step_index': step_index,
+                        'reaction': reaction,
+                        'reactants_smiles': reactants_smiles,
+                        'product_smiles': product_smiles,
+                        'reaction_smiles_str': reaction_smiles_str
                     })
+                    
                 except Exception as e:
-                    logger.error(f"Error processing step {step_index} in route {index}: {e}", exc_info=True)
+                    logger.error(f"Error preparing reaction for step {step_index} in route {index}: {e}")
                     continue
+            
+            # Predict yields for all reactions in this route using the advanced predictor
+            predicted_yields = {}
+            predicted_conditions = {}
+            if yield_predictor and reaction_smiles_list:
+                try:
+                    logger.info(f"Predicting yields for {len(reaction_smiles_list)} reactions in route {index + 1}")
+                    yield_results = yield_predictor.predict(reaction_smiles_list)
+                    
+                    for i, result in enumerate(yield_results):
+                        if 'error' not in result:
+                            # Extract the numerical yield value
+                            yield_str = result.get('best_yield', '0.0%')
+                            yield_value = float(yield_str.replace('%', ''))
+                            predicted_yields[reaction_smiles_list[i]] = yield_value
+                            optimal_conditions = result.get('optimal_conditions', {})
+                            predicted_conditions[reaction_smiles_list[i]] = optimal_conditions
+                            logger.info(f"Predicted yield for reaction {i+1}: {yield_value:.1f}%")
+                            logger.info(f"Predicted conditions: {optimal_conditions}")
+                        else:
+                            logger.warning(f"Yield prediction failed for reaction {i+1}: {result['error']}")
+                            
+                except Exception as e:
+                    logger.error(f"Error during yield prediction for route {index + 1}: {e}")
+            
+            # Process each step with the predicted yields
+            for metadata in step_metadata:
+                step_index = metadata['step_index']
+                reaction = metadata['reaction']
+                reactants_smiles = metadata['reactants_smiles']
+                product_smiles = metadata['product_smiles']
+                reaction_smiles_str = metadata['reaction_smiles_str']
+                predicted_condition_info = predicted_conditions.get(reaction_smiles_str, {})
+                
+                # Format conditions string
+                conditions_parts = []
+                if predicted_condition_info.get('catalyst'):
+                    conditions_parts.append(f"Catalyst: {predicted_condition_info['catalyst']}")
+                if predicted_condition_info.get('solvents'):
+                    conditions_parts.append(f"Solvent: {predicted_condition_info['solvents']}")
+                if predicted_condition_info.get('reagents'):
+                    conditions_parts.append(f"Reagents: {predicted_condition_info['reagents']}")
+                if predicted_condition_info.get('temperature'):
+                    conditions_parts.append(f"Temperature: {predicted_condition_info['temperature']}")
+                predicted_conditions_str = "; ".join(conditions_parts) if conditions_parts else "Conditions not predicted"
+                
+                # Use predicted yield if available, otherwise fall back to original method
+                if reaction_smiles_str in predicted_yields:
+                    yield_value = predicted_yields[reaction_smiles_str]
+                    logger.info(f"Using predicted yield for step {step_index + 1}: {yield_value:.1f}%")
+                else:
+                    # Fallback to original yield calculation
+                    yield_fraction = reaction.metadata.get('plausibility', reaction.metadata.get('template_score', 0.0))
+                    if yield_fraction == 0.0:
+                        num_steps = len(step_metadata)
+                        if num_steps > 0 and route_score > 0:
+                            yield_fraction = route_score**(1 / num_steps)
+                    yield_value = yield_fraction * 100
+                    logger.info(f"Using fallback yield for step {step_index + 1}: {yield_value:.1f}%")
+                
+                step_details = {"title": "Reaction", "conditions": "N/A", "notes": "N/A"}
+                step_id = f"{route_id}_step_{step_index + 1}"
+                image_url = generate_reaction_image(reaction_smiles_str, step_id)
+
+                try:
+                    elaboration_prompt = format_prompt("elaborate_synthesis_step", reaction_smiles=reaction_smiles_str)
+                    if elaboration_prompt:
+                        llm_response = generate_text(elaboration_prompt, temperature=0.5)
+                        if llm_response:
+                            cleaned_response = llm_response.strip().replace('```json', '').replace('```', '').strip()
+                            step_details = json.loads(cleaned_response)
+                except Exception as e:
+                    logger.warning(f"LLM elaboration failed for step {step_index}: {e}")
+
+                route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.1f}%)")
+
+                # route_info["steps"].append({
+                #     "step_number": step_index + 1,
+                #     "title": step_details.get("title", "Unnamed Reaction"),
+                #     "yield": yield_value,
+                #     "reagents_conditions": step_details.get("conditions", "Not specified"),
+                #     "source_notes": step_details.get("notes", "No specific notes available."),
+                #     "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
+                #     "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
+                #     "reaction_image_url": image_url 
+                # })
+
+                route_info["steps"].append({
+                    "step_number": step_index + 1,
+                    "title": step_details.get("title", "Unnamed Reaction"),
+                    "yield": yield_value,
+                    "reagents_conditions": predicted_conditions_str, 
+                    "predicted_conditions": predicted_condition_info, 
+                    "source_notes": step_details.get("notes", "No specific notes available."),
+                    "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
+                    "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
+                    "reaction_image_url": image_url,
+                    "optimized_reaction_smiles": result.get('optimized_reaction_smiles', reaction_smiles_str)  # Include full reaction
+                })
+            
+            # Calculate overall yield from individual step yields
+            if route_info["steps"]:
+                overall_yield = 1.0
+                for step in route_info["steps"]:
+                    overall_yield *= (step["yield"] / 100.0)
+                route_info["overall_yield"] = overall_yield * 100
+                logger.info(f"Calculated overall yield for route {index + 1}: {route_info['overall_yield']:.1f}%")
             
             # --- LLM Route Evaluation with Explicit Yield Context ---
             if route_description_for_eval:
@@ -381,6 +489,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
 
     logger.info(f"Successfully processed and returning {len(routes_data)} routes")
     return {"routes": routes_data}
+
 
 def generate_hypothetical_route(suggestion: str, existing_routes: list, target_smiles: str) -> dict | None:
     """

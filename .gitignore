@@ -185,3 +185,6 @@ debug_output/
 config_local.yml
 secrets.yml
 .secrets
+
+*.pt
+*.bin 
