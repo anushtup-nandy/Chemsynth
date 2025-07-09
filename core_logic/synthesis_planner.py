@@ -10,6 +10,9 @@ from utils.prompt_loader import format_prompt
 from utils.reaction_utils import map_reaction, generate_reaction_image
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
 from utils.yield_optimizer import AdvancedYieldPredictor
+import requests
+import json
+from urllib.parse import quote
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,11 +40,109 @@ def resolve_molecule_identifier(identifier: str) -> str | None:
         logger.info(f"Querying PubChem for '{identifier}'...")
         # PubChemPy's 'name' namespace searches names, synonyms, and CAS RNs
         results = pcp.get_compounds(identifier, 'name')
-        if results:
+        if results and len(results) > 0:  # Check if results exist and are not empty
             compound = results[0]
-            smiles = compound.isomeric_smiles
-            logger.info(f"Resolved '{identifier}' to SMILES: {smiles}")
-            return smiles
+            logger.info(f"Found compound CID: {compound.cid}")
+            
+            # Try to get a fresh compound object by CID to ensure all properties are loaded
+            try:
+                logger.info(f"Fetching fresh compound data for CID: {compound.cid}")
+                fresh_compound = pcp.Compound.from_cid(compound.cid)
+                compound = fresh_compound
+                logger.info(f"Successfully fetched fresh compound data")
+            except Exception as e:
+                logger.warning(f"Could not fetch fresh compound data: {e}, using original")
+            
+            # Try different SMILES properties in order of preference
+            smiles = None
+            smiles_sources = [
+                ('isomeric_smiles', getattr(compound, 'isomeric_smiles', None)),
+                ('canonical_smiles', getattr(compound, 'canonical_smiles', None)),
+                ('smiles', getattr(compound, 'smiles', None))
+            ]
+            
+            for source_name, smiles_value in smiles_sources:
+                logger.info(f"Checking {source_name}: {smiles_value}")
+                if smiles_value and str(smiles_value).strip():
+                    smiles = str(smiles_value).strip()
+                    logger.info(f"Found SMILES from {source_name}: {smiles}")
+                    break
+            
+            if smiles:
+                logger.info(f"Resolved '{identifier}' to SMILES: {smiles}")
+                return smiles
+            else:
+                logger.warning(f"PubChem found compound for '{identifier}' (CID: {compound.cid}) but no SMILES available")
+                # As a last resort, try a direct API call with correct property names
+                try:
+                    logger.info(f"Attempting direct API call for CID: {compound.cid}")
+                    import requests
+                    
+                    # Try multiple property names that are valid in PubChem API
+                    property_names = [
+                        "IsomericSMILES",
+                        "CanonicalSMILES", 
+                        "SMILES"
+                    ]
+                    
+                    for prop_name in property_names:
+                        try:
+                            api_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{compound.cid}/property/{prop_name}/JSON"
+                            logger.info(f"Trying API URL: {api_url}")
+                            response = requests.get(api_url, timeout=10)
+                            logger.info(f"API response status: {response.status_code}")
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                logger.info(f"API response data: {data}")
+                                if 'PropertyTable' in data and 'Properties' in data['PropertyTable']:
+                                    properties = data['PropertyTable']['Properties']
+                                    if properties and prop_name in properties[0]:
+                                        smiles = properties[0][prop_name]
+                                        logger.info(f"Got SMILES from direct API ({prop_name}): {smiles}")
+                                        return smiles
+                                    else:
+                                        logger.info(f"No {prop_name} in API response properties")
+                                else:
+                                    logger.warning(f"Unexpected API response structure: {data}")
+                            else:
+                                logger.info(f"API call failed with status {response.status_code} for {prop_name}")
+                                
+                        except Exception as e:
+                            logger.warning(f"API call failed for {prop_name}: {e}")
+                            continue
+                    
+                    # If all property API calls failed, try the SDF format approach
+                    logger.info("Trying SDF format approach")
+                    try:
+                        sdf_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{compound.cid}/SDF"
+                        response = requests.get(sdf_url, timeout=10)
+                        if response.status_code == 200:
+                            sdf_content = response.text
+                            # Parse SDF to extract SMILES using RDKit
+                            from io import StringIO
+                            sdf_supplier = Chem.SDMolSupplier(StringIO(sdf_content), sanitize=False)
+                            for mol in sdf_supplier:
+                                if mol is not None:
+                                    try:
+                                        Chem.SanitizeMol(mol)
+                                        smiles = Chem.MolToSmiles(mol)
+                                        logger.info(f"Got SMILES from SDF: {smiles}")
+                                        return smiles
+                                    except Exception as e:
+                                        logger.warning(f"Could not sanitize molecule from SDF: {e}")
+                                        continue
+                        else:
+                            logger.warning(f"SDF API call failed with status {response.status_code}")
+                    except Exception as e:
+                        logger.warning(f"SDF approach failed: {e}")
+                    
+                except Exception as e:
+                    logger.warning(f"All direct API calls failed: {e}")
+                    import traceback
+                    logger.warning(f"Traceback: {traceback.format_exc()}")
+                
+                return None
         else:
             logger.warning(f"Identifier '{identifier}' could not be resolved by PubChem.")
             return None
