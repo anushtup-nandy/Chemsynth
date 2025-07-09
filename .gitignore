@@ -188,3 +188,4 @@ secrets.yml
 
 *.pt
 *.bin 
+*.npy
