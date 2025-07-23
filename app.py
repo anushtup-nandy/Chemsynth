@@ -6,7 +6,7 @@ import traceback
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 
 from core_logic.literature_analysis import perform_literature_search
-from core_logic.synthesis_planner import plan_synthesis_route, generate_hypothetical_route, resolve_molecule_identifier
+from core_logic.synthesis_planner import plan_synthesis_route, resolve_molecule_identifier
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
 from core_logic.chemfm_synthesis_engine import generate_route_with_chemfm
 from utils.pubchem_processor import search_pubchem_literature
@@ -273,11 +273,8 @@ def api_generate_new_route():
     
     try:
         print(f"Generating new ChemFM route for: '{target_smiles}' with suggestion: '{suggestion}'")
-        # Call the new function from our new engine
         results = generate_route_with_chemfm(target_smiles, suggestion)
-        
         if "error" in results:
-             # Pass the specific error from the engine to the frontend
             return jsonify(results), 500
             
         return jsonify(results)

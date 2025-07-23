@@ -106,9 +106,7 @@ def generate_route_with_chemfm(target_smiles: str, user_suggestion: str) -> dict
         raw_prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
         logger.info(f"Raw ChemFM prediction: {raw_prediction}")
         
-        # ADDED: Clean the output string to remove common model generation errors.
-        # This removes spaces from the SMILES part and handles the messy prefix.
-        cleaned_prediction = raw_prediction.replace(' ', '') # <-- ADDED
+        cleaned_prediction = raw_prediction.replace(' ', '') 
         
         parts = cleaned_prediction.split('>>')
         if len(parts) < 2 or not parts[1]:
@@ -116,7 +114,6 @@ def generate_route_with_chemfm(target_smiles: str, user_suggestion: str) -> dict
             
         predicted_reactants_smiles = parts[1].split('.')
         
-        # Your original sanity check is still perfect.
         predicted_reactants_smiles = [smi for smi in predicted_reactants_smiles if Chem.MolFromSmiles(smi)]
         if not predicted_reactants_smiles:
             raise ValueError("ChemFM returned invalid reactant SMILES after cleaning and parsing.")

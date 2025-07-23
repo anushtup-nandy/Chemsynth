@@ -9,18 +9,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 from models.packages.rcr_torch_version.baseline_condition_model import NeuralNetContextRecommender
 from models.packages.yield_predictor.models import SmilesClassificationModel
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# if current_dir not in sys.path:
-#     sys.path.insert(0, current_dir)
-
-# try:
-#     from models.packages.rcr_torch_version.baseline_condition_model import NeuralNetContextRecommender
-#     from models.packages.yield_predictor.models import SmilesClassificationModel
-# except ImportError as e:
-#     print(f"Import error: {e}")
-#     print(f"Current directory: {current_dir}")
-#     print(f"Python path: {sys.path}")
-#     raise
 from torch.nn import MSELoss 
 
 class SmilesClassificationModelSelf(SmilesClassificationModel):

@@ -557,7 +557,6 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                 route_info["overall_yield"] = overall_yield * 100
                 logger.info(f"Calculated overall yield for route {index + 1}: {route_info['overall_yield']:.1f}%")
             
-            # --- LLM Route Evaluation with Explicit Yield Context ---
             if route_description_for_eval:
                 try:
                     # Create a more detailed description for the LLM to improve its evaluation.
@@ -591,47 +590,46 @@ def plan_synthesis_route(target_identifier: str) -> dict:
     logger.info(f"Successfully processed and returning {len(routes_data)} routes")
     return {"routes": routes_data}
 
-
-def generate_hypothetical_route(suggestion: str, existing_routes: list, target_smiles: str) -> dict | None:
-    """
-    Uses an LLM to generate a new, hypothetical synthesis route based on user suggestion.
-    """
-    logger.info(f"Generating hypothetical route for '{target_smiles}' based on suggestion: '{suggestion}'")
-    try:
-        # Format existing routes for the prompt context
-        context_str = json.dumps(existing_routes, indent=2)
+# def generate_hypothetical_route(suggestion: str, existing_routes: list, target_smiles: str) -> dict | None:
+#     """
+#     Uses an LLM to generate a new, hypothetical synthesis route based on user suggestion.
+#     """
+#     logger.info(f"Generating hypothetical route for '{target_smiles}' based on suggestion: '{suggestion}'")
+#     try:
+#         # Format existing routes for the prompt context
+#         context_str = json.dumps(existing_routes, indent=2)
         
-        prompt = format_prompt(
-            "propose_new_route",  # You'll need to create this prompt template
-            user_suggestion=suggestion,
-            target_molecule_smiles=target_smiles,
-            existing_routes_json=context_str
-        )
-        if not prompt:
-            logger.error("Could not format the 'propose_new_route' prompt.")
-            return None
+#         prompt = format_prompt(
+#             "propose_new_route",  # You'll need to create this prompt template
+#             user_suggestion=suggestion,
+#             target_molecule_smiles=target_smiles,
+#             existing_routes_json=context_str
+#         )
+#         if not prompt:
+#             logger.error("Could not format the 'propose_new_route' prompt.")
+#             return None
 
-        # Call the LLM
-        response = generate_text(prompt, temperature=0.6)
-        if not response:
-            logger.warning("LLM returned an empty response for hypothetical route.")
-            return None
+#         # Call the LLM
+#         response = generate_text(prompt, temperature=0.6)
+#         if not response:
+#             logger.warning("LLM returned an empty response for hypothetical route.")
+#             return None
 
-        # Clean and parse the JSON response from the LLM
-        cleaned_response = response.strip().replace('```json', '').replace('```', '').strip()
-        new_route_data = json.loads(cleaned_response)
+#         # Clean and parse the JSON response from the LLM
+#         cleaned_response = response.strip().replace('```json', '').replace('```', '').strip()
+#         new_route_data = json.loads(cleaned_response)
 
-        # Basic validation of the LLM output
-        if "id" in new_route_data and "steps" in new_route_data:
-            logger.info("Successfully generated and parsed a new hypothetical route.")
-            return {"new_route": new_route_data}
-        else:
-            logger.error(f"LLM output was malformed: {cleaned_response}")
-            return None
+#         # Basic validation of the LLM output
+#         if "id" in new_route_data and "steps" in new_route_data:
+#             logger.info("Successfully generated and parsed a new hypothetical route.")
+#             return {"new_route": new_route_data}
+#         else:
+#             logger.error(f"LLM output was malformed: {cleaned_response}")
+#             return None
 
-    except json.JSONDecodeError:
-        logger.error(f"Failed to decode LLM response into JSON. Response: {response}")
-        return None
-    except Exception as e:
-        logger.error(f"An error occurred during hypothetical route generation: {e}", exc_info=True)
-        return None
+#     except json.JSONDecodeError:
+#         logger.error(f"Failed to decode LLM response into JSON. Response: {response}")
+#         return None
+#     except Exception as e:
+#         logger.error(f"An error occurred during hypothetical route generation: {e}", exc_info=True)
+#         return None

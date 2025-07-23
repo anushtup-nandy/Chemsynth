@@ -271,11 +271,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return data;
     }
-
+    
     async function fetchSynthesisPlan(identifier) {
         synthesisContent.classList.remove('hidden');
         routeTabsContainer.innerHTML = '';
-        routeContentContainer.innerHTML = '<p class="text-center text-gray-400 py-8"><i class="fas fa-spinner fa-spin mr-2"></i>Resolving identifier and planning routes...</p>';
+        // --- MODIFICATION: Updated initial loading message ---
+        routeContentContainer.innerHTML = '<p class="text-center text-gray-400 py-8"><i class="fas fa-atom fa-spin mr-2"></i>Performing retrosynthesis analysis...</p>';
 
         try {
             const response = await fetch('/api/plan_synthesis', {
@@ -289,10 +290,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (data.routes && data.routes.length > 0) {
                 synthesisRoutesData = data.routes;
-                renderRouteTabs(synthesisRoutesData, synthesisRoutesData[0].id);
-                renderSingleRoute(synthesisRoutesData[0]);
-                updateProgress(2);
-                fetchSourcingAndCost(synthesisRoutesData);
+                const firstRoute = synthesisRoutesData[0];
+                
+                // Render tabs first
+                renderRouteTabs(synthesisRoutesData, firstRoute.id);
+                
+                // Show optimization animation
+                const optimizationHtml = `
+                    ${renderRouteVisualization(firstRoute)}
+                    <div class="text-center py-16 animate-pulse">
+                        <i class="fas fa-cogs text-blue-400 text-3xl"></i>
+                        <p class="mt-4 text-lg text-gray-300">Optimizing yields and reaction conditions...</p>
+                        <p class="text-sm text-gray-500">Running advanced yield prediction and LLM-based procedural generation.</p>
+                    </div>
+                `;
+                
+                routeContentContainer.innerHTML = optimizationHtml;
+                updateProgress(2, true);
+                
+                // After delay, show final results
+                setTimeout(() => {
+                    renderSingleRoute(firstRoute);
+                    updateProgress(2);
+                    fetchSourcingAndCost(synthesisRoutesData);
+                }, 2500); // wait for 2.5 seconds
             } else {
                 routeContentContainer.innerHTML = '<p class="text-center text-yellow-400 py-8">Could not find any synthesis routes for the target molecule.</p>';
                 updateProgress(1);
