@@ -30,8 +30,6 @@ def merge_reaction_with_conditions(naked_reaction: str, conditions: dict):
     """
     reactants, products = naked_reaction.split('>>')
     
-    # Add predicted conditions to the reactants string
-    # We filter out empty strings
     all_reactants = [reactants]
     for key in ['solvent', 'reagent', 'catalyst']:
         if conditions[key] and conditions[key] != '':
@@ -66,7 +64,7 @@ class AdvancedYieldPredictor:
         self.yield_model_dir = yield_model_dir
         
         # Determine if CUDA is available and should be used
-        use_cuda = torch.cuda.is_available() and cuda_device != -1
+        use_cuda = torch.mps.is_available() and cuda_device != -1
 
         # 1. Load the Condition Predictor (RCR Model)
         print(f"Loading Condition Predictor from: {self.condition_model_dir}")
@@ -181,12 +179,9 @@ class AdvancedYieldPredictor:
 if __name__ == '__main__':
     # Define paths relative to the script location
     this_dir = os.path.dirname(__file__)
-    # CONDITION_MODEL_PATH = os.path.join(this_dir, 'models', 'model 2')
-    # YIELD_MODEL_PATH = os.path.join(this_dir, 'models', 'model')
     CONDITION_MODEL_PATH = '/Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/models/model 2'
     YIELD_MODEL_PATH = '/Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/models/model'
     # --- Initialize the predictor ---
-    # This will load both models and may take a moment.
     predictor = AdvancedYieldPredictor(
         condition_model_dir=CONDITION_MODEL_PATH,
         yield_model_dir=YIELD_MODEL_PATH,
@@ -194,21 +189,15 @@ if __name__ == '__main__':
     )
 
     # --- Define some test reactions (without conditions) ---
-    # test_reactions = [
-    #     # A Suzuki coupling reaction
-    #     'CC1(C)OBOC1(C)C.Cc1ccc(Br)cc1>>Cc1cccc(B2OC(C)(C)C(C)(C)O2)c1',
-    #     # An esterification reaction
-    #     'CC(=O)O.CCO>>CC(=O)OCC'
-    # ]
     test_reactions = [
             # Condition 1: In-situ Grignard formation
-            "Cl[Si](Cl)(Cl)Cl.CC(C)(C)Cl.[Mg]>>CC(C)(C)[Si](Cl)(C(C)(C)C)C(C)(C)C",
+            "Cl[Si](Cl)(Cl)Cl >> Cl[Si](Cl)(C(C)(C)C)C(C)(C)C",
             
-            # Condition 2: Pre-formed Grignard reagent
-            "Cl[Si](Cl)(Cl)Cl.C(C)(C)[Mg]Cl>>CC(C)(C)[Si](Cl)(C(C)(C)C)C(C)(C)C",
+            # # Condition 2: Pre-formed Grignard reagent
+            # "Cl[Si](Cl)(Cl)Cl.C(C)(C)[Mg]Cl>>CC(C)(C)[Si](Cl)(C(C)(C)C)C(C)(C)C",
             
-            # Condition 3: Pre-formed Grignard with additives
-            "Cl[Si](Cl)(Cl)Cl.C(C)(C)[Mg]Cl.[Li]Cl.[Cu]Br>>CC(C)(C)[Si](Cl)(C(C)(C)C)C(C)(C)C"
+            # # Condition 3: Pre-formed Grignard with additives
+            # "Cl[Si](Cl)(Cl)Cl.C(C)(C)[Mg]Cl.[Li]Cl.[Cu]Br>>CC(C)(C)[Si](Cl)(C(C)(C)C)C(C)(C)C"
         ]
 
     optimized_results = predictor.predict(test_reactions)

@@ -4,9 +4,6 @@ from typing import List, Dict, Optional, Any
 from .llm_interface import generate_text
 from .prompt_loader import format_prompt, get_prompt_template
 
-# utils/arxiv_processor.py - Updated categories section
-
-# More focused categories for chemistry and pharmaceutical research
 CHEMISTRY_FOCUSED_CATEGORIES = [
     # ==================== PRIMARY CHEMISTRY CATEGORIES ====================
     'chem-ph',  # Chemical Physics - PRIMARY CATEGORY for chemistry
@@ -93,8 +90,7 @@ def search_arxiv(
         A list of dictionaries containing paper metadata
     """
     search_results_list: List[Dict[str, Any]] = []
-    
-    # Choose category set based on search strategy
+
     relevant_categories = EXTENDED_CHEMISTRY_CATEGORIES if use_extended_categories else CHEMISTRY_FOCUSED_CATEGORIES
     
     try:   

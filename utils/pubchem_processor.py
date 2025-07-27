@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import time
 import requests
 from urllib.parse import quote
+from config import APP_CONFIG
 
 def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
@@ -160,7 +161,8 @@ def _fetch_pubmed_details(pmid_list: List[int], cid: int, compound_name: str) ->
     try:
         # Use Entrez to fetch paper details
         from Bio import Entrez
-        Entrez.email = "your-email@example.com"  # Required by NCBI
+        # Entrez.email = "your-email@example.com"  # Required by NCBI
+        Entrez.email = APP_CONFIG.EMAIL
         
         # Fetch summaries for all PMIDs at once
         pmid_str = ','.join(map(str, pmid_list))

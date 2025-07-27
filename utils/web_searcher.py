@@ -50,7 +50,7 @@ def search_duckduckgo(query: str, max_results: int = 5, region: str = 'wt-wt') -
                 max_results=max_results
             )
             if results:
-                for res in results: # results is already a list of dicts
+                for res in results: 
                     results_list.append({
                         "title": res.get("title", "N/A"),
                         "href": res.get("href", "#"),
@@ -112,7 +112,7 @@ def search_duckduckgo_tor(query: str, max_results: int = 7, region: str = 'wt-wt
 
             title_tag = block.find('a', class_='result__a') or \
                         block.find('a', class_='result-link') or \
-                        block.find('h2', class_='result__title') # In case title is in h2
+                        block.find('h2', class_='result__title') 
             
             snippet_tag = block.find('a', class_='result__snippet') or \
                           block.find('div', class_='result__snippet') or \

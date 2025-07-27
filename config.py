@@ -13,6 +13,7 @@ class Config:
     # Flask specific settings (optional for now)
     DEBUG = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "t")
     SECRET_KEY = os.getenv("SECRET_KEY", "a_very_secret_key_for_dev_only")
+    EMAIL = os.getenv("EMAIL")
 
 
 APP_CONFIG = Config()
