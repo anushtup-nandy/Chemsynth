@@ -355,7 +355,12 @@ document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/analyze_sourcing', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ route_steps: route.steps, target_amount_g: 1.0 })
+                // body: JSON.stringify({ route_steps: route.steps, target_amount_g: 1.0 })
+                body: JSON.stringify({ 
+                    route_steps: route.steps, 
+                    target_amount_g: 1.0,      
+                    default_yield_percent: 85.0 
+                })
             })
             .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch analysis'))
             .then(data => ({ routeId: route.id, analysis: data }))
@@ -819,13 +824,61 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        let tableRows = '';
-        const details = data.sourcing_details || {};
-        if (Object.keys(details).length === 0) {
-            costContent.innerHTML = '<h2 class="text-xl font-bold mb-4">Estimated Cost Analysis</h2><p class="text-center text-gray-400 py-8">No starting materials require purchasing for this route.</p>';
-            return;
+        const route = synthesisRoutesData.find(r => r.id === routeId);
+        if (!route) {
+             costContent.innerHTML = `<p class="text-center text-red-400">Error: Could not find route data for ID ${routeId}.</p>`;
+             return;
         }
 
+        // --- NEW: Generate UI for per-step yield overrides ---
+        let stepYieldsHtml = '';
+        if (route.steps && route.steps.length > 0) {
+            stepYieldsHtml = route.steps.map(step => `
+                <div class="flex items-center justify-between py-2 border-b border-gray-800 last:border-b-0">
+                    <label for="yield-step-${step.step_number}" class="text-sm text-gray-300">
+                        Step ${step.step_number}: ${step.title}
+                    </label>
+                    <input type="number" step="0.1" id="yield-step-${step.step_number}" 
+                           class="molecule-input w-24 p-1 rounded-lg text-right" 
+                           placeholder="${(step.yield || 0).toFixed(1)}"
+                           data-step-number="${step.step_number}">
+                </div>
+            `).join('');
+        }
+
+        // --- MODIFICATION: Updated controls layout ---
+        const controlsHtml = `
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <!-- Global Parameters -->
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                    <h4 class="font-bold text-gray-200 mb-3">Global Parameters</h4>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="cost-target-amount" class="block text-sm font-medium text-gray-300 mb-1">Target Amount (g)</label>
+                            <input type="number" step="0.01" id="cost-target-amount" class="molecule-input w-full p-2 rounded-lg" value="${data.analysis_summary.target_amount_g || 1.0}">
+                        </div>
+                        <div>
+                            <label for="cost-default-yield" class="block text-sm font-medium text-gray-300 mb-1">Default Yield for Unspecified Steps (%)</label>
+                            <input type="number" step="0.1" id="cost-default-yield" class="molecule-input w-full p-2 rounded-lg" value="${(data.assumptions.find(s => s.includes('Default yield')) || '85').match(/[0-9.]+/)[0]}">
+                        </div>
+                    </div>
+                </div>
+                <!-- Per-Step Overrides -->
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                     <h4 class="font-bold text-gray-200 mb-3">Per-Step Yield Overrides (%)</h4>
+                     <div class="space-y-1 max-h-48 overflow-y-auto pr-2">${stepYieldsHtml}</div>
+                </div>
+            </div>
+            <div class="text-center mb-8">
+                 <button id="recalculate-cost-btn" class="gradient-bg-blue text-white font-medium py-3 px-8 rounded-lg hover:shadow-lg w-full sm:w-auto">
+                    <i class="fas fa-sync-alt mr-2"></i> Recalculate Cost
+                </button>
+            </div>
+        `;
+
+        // --- MODIFICATION: Cost breakdown table rendering (no logic change here) ---
+        let tableRows = '';
+        const details = data.sourcing_details || {};
         for (const smiles in details) {
             const reagent = details[smiles];
             tableRows += `
@@ -836,30 +889,79 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="p-4 font-bold">${formatCurrency(reagent.estimated_cost || 0)}</td>
                 </tr>`;
         }
-
+        
+        // Final container assembly
         costContent.innerHTML = `
-            <h2 class="text-xl font-bold mb-6">Estimated Cost Analysis</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div class="bg-gray-700 rounded-lg p-6 text-center">
-                    <h3 class="text-sm font-medium text-gray-400 uppercase">Total Estimated Cost</h3>
-                    <p class="text-4xl font-bold mt-2 gradient-text-blue">${formatCurrency(data.total_cost || 0)}</p>
+            <h2 class="text-xl font-bold mb-4">Estimated Cost Analysis</h2>
+            ${controlsHtml}
+            <div id="cost-results-container">
+                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-gray-700 rounded-lg p-6 text-center">
+                        <h3 class="text-sm font-medium text-gray-400 uppercase">Total Estimated Cost</h3>
+                        <p class="text-4xl font-bold mt-2 gradient-text-blue">${formatCurrency(data.total_cost || 0)}</p>
+                    </div>
+                     <div class="md:col-span-2 bg-gray-700 rounded-lg p-6">
+                        <h3 class="text-sm font-medium text-gray-400 uppercase mb-3">Analysis Assumptions</h3>
+                        <ul class="text-xs text-gray-300 list-disc list-inside space-y-1">
+                            ${(data.assumptions || []).map(item => `<li>${item}</li>`).join('')}
+                        </ul>
+                    </div>
                 </div>
-                 <div class="md:col-span-2 bg-gray-700 rounded-lg p-6">
-                    <h3 class="text-sm font-medium text-gray-400 uppercase mb-3">Assumptions</h3>
-                    <ul class="text-xs text-gray-300 list-disc list-inside space-y-1">
-                        ${(data.assumptions || []).map(item => `<li>${item}</li>`).join('')}
-                    </ul>
-                </div>
-            </div>
-            <h3 class="text-lg font-bold mb-4">Cost Breakdown by Reagent</h3>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left">
-                     <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
-                        <tr><th class="p-4">Reagent</th><th class="p-4">Amount Required</th><th class="p-4">Cost per Gram</th><th class="p-4">Subtotal</th></tr>
-                    </thead>
-                    <tbody class="text-sm">${tableRows}</tbody>
-                </table>
+                <h3 class="text-lg font-bold mb-4">Cost Breakdown by Reagent</h3>
+                <div class="overflow-x-auto">${Object.keys(details).length > 0 ? `
+                    <table class="w-full text-left">
+                         <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
+                            <tr><th class="p-4">Reagent</th><th class="p-4">Amount Required</th><th class="p-4">Cost per Gram</th><th class="p-4">Subtotal</th></tr>
+                        </thead>
+                        <tbody class="text-sm">${tableRows}</tbody>
+                    </table>` : `<p class="text-center text-gray-400 py-8">No starting materials require purchasing for this route.</p>`
+                }</div>
             </div>`;
+
+        // --- MODIFICATION: Updated event listener for recalculation ---
+        document.getElementById('recalculate-cost-btn').addEventListener('click', async function() {
+            const button = this;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Recalculating...';
+            button.disabled = true;
+
+            const targetAmount = parseFloat(document.getElementById('cost-target-amount').value);
+            const defaultYield = parseFloat(document.getElementById('cost-default-yield').value);
+            
+            // Create a deep copy of the route steps to modify
+            const updatedSteps = JSON.parse(JSON.stringify(route.steps));
+
+            // Apply per-step overrides
+            updatedSteps.forEach(step => {
+                const input = document.getElementById(`yield-step-${step.step_number}`);
+                const overrideValue = input.value.trim();
+                if (overrideValue !== '') {
+                    step.yield = parseFloat(overrideValue);
+                }
+            });
+
+            try {
+                const response = await fetch('/api/analyze_sourcing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        route_steps: updatedSteps, // Send the modified steps
+                        target_amount_g: targetAmount,
+                        default_yield_percent: defaultYield
+                    })
+                });
+                const newData = await response.json();
+                if (!response.ok) throw new Error(newData.error || 'Failed to recalculate cost');
+
+                sourcingData[routeId] = newData;
+                renderCostAnalysis(routeId); // Re-render with new data and controls
+
+            } catch (error) {
+                console.error("Recalculation error:", error);
+                alert(`Error recalculating cost: ${error.message}`);
+                button.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Recalculate Cost';
+                button.disabled = false;
+            }
+        });
     }
 
     function renderKnowledgeGraph(routeId) {

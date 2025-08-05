@@ -244,13 +244,18 @@ def api_analyze_sourcing():
     data = request.json
     route_steps = data.get('route_steps')
     target_amount_g = float(data.get('target_amount_g', 1.0))
+    default_yield_percent = float(data.get('default_yield_percent', 85.0))
 
     if not route_steps:
         return jsonify({"error": "Route steps are required for analysis."}), 400
 
     try:
         print(f"Analyzing sourcing for {len(route_steps)} route steps, target amount: {target_amount_g}g")
-        analysis_results = analyze_route_cost_and_sourcing(route_steps, target_amount_g)
+        analysis_results = analyze_route_cost_and_sourcing(
+            route_steps, 
+            target_amount_g,
+            default_yield_percent
+        )
         return jsonify(analysis_results)
     except Exception as e:
         print(f"An unhandled error occurred during sourcing analysis: {e}")

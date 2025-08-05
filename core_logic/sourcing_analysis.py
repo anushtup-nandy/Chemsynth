@@ -235,7 +235,7 @@ def get_compound_info(smiles: str) -> dict:
         return {"error": str(e)}
 
 
-def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 1.0) -> dict:
+def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 1.0, default_yield_percent: float = 85.0) -> dict:
     """
     Analyzes a list of synthesis steps to determine reagent sources and total cost.
     Enhanced with better error handling and more detailed analysis.
@@ -251,7 +251,7 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
             "analysis_notes": ["No synthesis steps provided"]
         }
     
-    print(f"Analyzing {len(route_steps)} synthesis steps for {target_amount_g}g target")
+    print(f"Analyzing {len(route_steps)} synthesis steps for {target_amount_g}g target with {default_yield_percent}% default yield.")
     
     # Track required amounts for each compound
     required_amount = {route_steps[-1]['product']['smiles']: target_amount_g}
@@ -271,10 +271,10 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
         moles_needed = amount_needed_g / product_mw if product_mw > 0 else 0
         
         # Handle yield calculation with safety checks
-        step_yield = step.get('yield', 85) / 100.0  # Default to 85% if not specified
+        step_yield = step.get('yield', default_yield_percent) / 100.0
         if step_yield <= 0:
             step_yield = 0.5  # Fallback to 50% if invalid yield
-            analysis_notes.append(f"Invalid yield in step {step_idx + 1}, using 50% fallback")
+            analysis_notes.append(f"Invalid yield in step {len(route_steps) - step_idx}, using 50% fallback")
         
         moles_required = moles_needed / step_yield
 
@@ -327,8 +327,8 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
                     "molecular_weight": compound_info.get('molecular_weight', reactant_mw),
                     "suppliers": suppliers,
                     "cheapest_option": min(suppliers, key=lambda x: x['price_per_g']) if suppliers else None,
-                    "required_amount_g": 0,  # Will be updated below
-                    "estimated_cost": 0      # Will be updated below
+                    "required_amount_g": 0, 
+                    "estimated_cost": 0      
                 }
 
     # Calculate final costs based on total required amounts
@@ -350,6 +350,24 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
     num_starting_materials = len(sourcing_details)
     num_steps = len(route_steps)
     
+    # return {
+    #     "total_cost": round(total_cost, 2),
+    #     "sourcing_details": sourcing_details,
+    #     "analysis_summary": {
+    #         "number_of_steps": num_steps,
+    #         "starting_materials_required": num_starting_materials,
+    #         "target_amount_g": target_amount_g,
+    #         "total_estimated_cost_usd": round(total_cost, 2)
+    #     },
+    #     "assumptions": [
+    #         f"Cost analysis for {target_amount_g}g of final product",
+    #         "Assumes 1:1 stoichiometry unless otherwise specified",
+    #         "Default yield of 85% per step if not specified",
+    #         "Prices are estimates based on typical chemical vendor pricing",
+    #         "Actual prices may vary significantly based on quantity, vendor, and market conditions"
+    #     ],
+    #     "analysis_notes": analysis_notes
+    # }
     return {
         "total_cost": round(total_cost, 2),
         "sourcing_details": sourcing_details,
@@ -360,11 +378,11 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
             "total_estimated_cost_usd": round(total_cost, 2)
         },
         "assumptions": [
-            f"Cost analysis for {target_amount_g}g of final product",
-            "Assumes 1:1 stoichiometry unless otherwise specified",
-            "Default yield of 85% per step if not specified",
-            "Prices are estimates based on typical chemical vendor pricing",
-            "Actual prices may vary significantly based on quantity, vendor, and market conditions"
+            f"Cost analysis for {target_amount_g}g of final product.",
+            "Assumes 1:1 stoichiometry unless otherwise specified.",
+            f"Default yield of {default_yield_percent}% per step if not specified.",
+            "Prices are estimates based on typical chemical vendor pricing.",
+            "Actual prices may vary significantly based on quantity, vendor, and market conditions."
         ],
         "analysis_notes": analysis_notes
     }

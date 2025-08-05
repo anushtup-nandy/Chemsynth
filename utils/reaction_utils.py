@@ -1,4 +1,3 @@
-# utils/reaction_utils.py
 import os
 from pathlib import Path
 from rdkit import Chem

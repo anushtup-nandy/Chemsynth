@@ -10,6 +10,8 @@ if project_root not in sys.path:
 from models.packages.rcr_torch_version.baseline_condition_model import NeuralNetContextRecommender
 from models.packages.yield_predictor.models import SmilesClassificationModel
 from torch.nn import MSELoss 
+#from rxn_insight.reaction import Reaction
+import json
 
 class SmilesClassificationModelSelf(SmilesClassificationModel):
     """A simple wrapper to handle the specific loading arguments we need."""
@@ -202,6 +204,11 @@ if __name__ == '__main__':
 
     optimized_results = predictor.predict(test_reactions)
 
-    import json
+    # print("REACTION INSIGHT ---------")
+    # r = "Cl[Si](Cl)(Cl)Cl >> Cl[Si](Cl)(C(C)(C)C)C(C)(C)C"
+    # rxn = Reaction(r)
+    # ri = rxn.get_reaction_info()
+    # print(ri)
+
     print("\n--- OPTIMIZATION RESULTS ---")
     print(json.dumps(optimized_results, indent=2))
