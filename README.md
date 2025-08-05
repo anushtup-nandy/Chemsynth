@@ -1,10 +1,9 @@
 # ChemSynthAi
-**Synthesis Navigator AI** is a comprehensive, AI-powered web platform designed to accelerate chemical synthesis research. It serves as a computational copilot for chemists, integrating literature analysis, multiple retrosynthesis strategies, reaction optimization, and logistical planning into a single, cohesive workflow.
+**ChemsynthAI** is a comprehensive, AI-powered web platform designed to accelerate chemical synthesis research. It serves as a computational copilot for chemists, integrating literature analysis, multiple retrosynthesis strategies, reaction optimization, and logistical planning into a single, cohesive workflow.
 
 The platform leverages a hybrid approach, combining the structured, evidence-based predictions of traditional cheminformatics tools with the creative, pattern-recognition capabilities of modern large language models (LLMs) and deep learning.
 
- 
-*(Placeholder for a GIF demonstrating the web UI in action)*
+![chemsynth](img/chemsynth.jpeg)
 
 ---
 
