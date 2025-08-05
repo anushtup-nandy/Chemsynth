@@ -1,15 +1,4 @@
-Of course. As a computational scientist, creating comprehensive, reproducible documentation is as crucial as writing the code itself. Here is a production-grade, detailed README for the provided chemical synthesis platform.
-
----
-
-# Synthesis Navigator AI
-
-[![Python Version][python-badge]][python-url]
-[![License: MIT][license-badge]][license-url]
-[![Code Style: Black][black-badge]][black-url]
-[![Tests: Pytest][pytest-badge]][pytest-url]
-[![Framework: Flask][flask-badge]][flask-url]
-
+# ChemSynthAi
 **Synthesis Navigator AI** is a comprehensive, AI-powered web platform designed to accelerate chemical synthesis research. It serves as a computational copilot for chemists, integrating literature analysis, multiple retrosynthesis strategies, reaction optimization, and logistical planning into a single, cohesive workflow.
 
 The platform leverages a hybrid approach, combining the structured, evidence-based predictions of traditional cheminformatics tools with the creative, pattern-recognition capabilities of modern large language models (LLMs) and deep learning.
@@ -82,49 +71,44 @@ graph TD
     subgraph User Interface
         A[Web Frontend]
     end
-
-    subgraph Backend Server (Flask App)
+    subgraph Backend Server Flask App
         B[API Gateway / app.py]
     end
-
     subgraph Core Logic Modules
-        C[Synthesis Planner<br>(synthesis_planner.py)]
-        D[ChemFM Engine<br>(chemfm_synthesis_engine.py)]
-        E[Literature Analyzer<br>(literature_analysis.py)]
-        F[Sourcing Analyzer<br>(sourcing_analysis.py)]
+        C[Synthesis Planner<br/>synthesis_planner.py]
+        D[ChemFM Engine<br/>chemfm_synthesis_engine.py]
+        E[Literature Analyzer<br/>literature_analysis.py]
+        F[Sourcing Analyzer<br/>sourcing_analysis.py]
     end
-
-    subgraph Utility & ML Modules
-        G[Yield Optimizer<br>(yield_optimizer.py)]
-        H[Reaction Balancer<br>(balance_reaction.py)]
-        I[LLM Interface<br>(utils/llm_interface.py)]
-        J[Database Processors<br>(utils/*_processor.py)]
+    subgraph Utility ML Modules
+        G[Yield Optimizer<br/>yield_optimizer.py]
+        H[Reaction Balancer<br/>balance_reaction.py]
+        I[LLM Interface<br/>utils/llm_interface.py]
+        J[Database Processors<br/>utils/*_processor.py]
     end
-
-    subgraph Data Sources & Models
-        K[Local ML Models<br>- AiZynthFinder<br>- Yield & Condition Predictors]
-        L[Hugging Face Hub<br>- ChemFM Model]
-        M[External APIs<br>- PubChem/PubMed<br>- arXiv<br>- Europe PMC<br>- DuckDuckGo]
+    subgraph Data Sources Models
+        K[Local ML Models<br/>- AiZynthFinder<br/>- Yield & Condition Predictors]
+        L[Hugging Face Hub<br/>- ChemFM Model]
+        M[External APIs<br/>- PubChem/PubMed<br/>- arXiv<br/>- Europe PMC<br/>- DuckDuckGo]
     end
-
     A -- REST API Call --> B
-
-    B -- "Plan Synthesis" --> C
-    B -- "Generate New Route" --> D
-    B -- "Literature Search" --> E
-    B -- "Analyze Sourcing" --> F
-
-    C -- Uses --> G & H & I
-    D -- Uses --> G & I
-    E -- Uses --> J & I
-
+    B -- Plan Synthesis --> C
+    B -- Generate New Route --> D
+    B -- Literature Search --> E
+    B -- Analyze Sourcing --> F
+    C -- Uses --> G
+    C -- Uses --> H
+    C -- Uses --> I
+    D -- Uses --> G
+    D -- Uses --> I
+    E -- Uses --> J
+    E -- Uses --> I
     G -- Loads --> K
     C -- Uses AiZynthFinder --> K
     D -- Loads from --> L
-
-    I -- Calls --> M[Google Gemini API]
+    I -- Calls --> M
     J -- Calls --> M
-    F -- Calls --> M[PubChem API]
+    F -- Calls --> M
 ```
 
 **Component Breakdown:**
