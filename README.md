@@ -158,8 +158,8 @@ The platform's capabilities are powered by a suite of state-of-the-art models an
 
 1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/your-username/synthesis-navigator-ai.git
-    cd synthesis-navigator-ai
+    git clone https://github.com/your-username/Chemsynth.git
+    cd Chemsynth
     ```
 
 2.  **Create and Activate Conda Environment**
