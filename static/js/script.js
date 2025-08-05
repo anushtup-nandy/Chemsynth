@@ -43,15 +43,15 @@ document.addEventListener('DOMContentLoaded', function() {
     newRouteButton.addEventListener('click', handleNewRouteClick);
     cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
     submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit);
-    // routeContentContainer.addEventListener('click', function(e) {
-    //     if (e.target.matches('.expand-reactant-btn')) {
-    //         e.preventDefault();
-    //         const button = e.target;
-    //         const smiles = button.dataset.smiles;
-    //         const targetContainerId = button.dataset.target;
-    //         handleExpandReactant(smiles, targetContainerId, button);
-    //     }
-    // });
+    routeContentContainer.addEventListener('click', function(e) {
+        if (e.target.matches('.expand-reactant-btn')) {
+            e.preventDefault();
+            const button = e.target;
+            const smiles = button.dataset.smiles;
+            const targetContainerId = button.dataset.target;
+            handleExpandReactant(smiles, targetContainerId, button);
+        }
+    });
 
     routeContentContainer.addEventListener('click', function(e) {
         const expandableBox = e.target.closest('.expandable-molecule');
@@ -191,40 +191,40 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // async function handleExpandReactant(smiles, targetContainerId, button) {
-    //     const container = document.getElementById(targetContainerId);
-    //     if (!container) return;
+    async function handleExpandReactant(smiles, targetContainerId, button) {
+        const container = document.getElementById(targetContainerId);
+        if (!container) return;
 
-    //     // Prevent multiple clicks
-    //     button.disabled = true;
-    //     button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+        // Prevent multiple clicks
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
 
-    //     try {
-    //         const response = await fetch('/api/plan_synthesis', {
-    //             method: 'POST',
-    //             headers: { 'Content-Type': 'application/json' },
-    //             body: JSON.stringify({ identifier: smiles }),
-    //         });
+        try {
+            const response = await fetch('/api/plan_synthesis', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier: smiles }),
+            });
 
-    //         const data = await response.json();
-    //         if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
 
-    //         if (data.routes && data.routes.length > 0) {
-    //             // Render the best sub-route
-    //             renderSubRoute(data.routes[0], container);
-    //             button.style.display = 'none'; // Hide button after successful expansion
-    //         } else {
-    //             container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
-    //             button.style.display = 'none';
-    //         }
+            if (data.routes && data.routes.length > 0) {
+                // Render the best sub-route
+                renderSubRoute(data.routes[0], container);
+                button.style.display = 'none'; // Hide button after successful expansion
+            } else {
+                container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
+                button.style.display = 'none';
+            }
 
-    //     } catch (error) {
-    //         console.error('Error expanding synthesis tree:', error);
-    //         container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
-    //         button.disabled = false; // Re-enable button on failure
-    //         button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
-    //     }
-    // }
+        } catch (error) {
+            console.error('Error expanding synthesis tree:', error);
+            container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
+            button.disabled = false; // Re-enable button on failure
+            button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
+        }
+    }
 
     async function handleExpandVisualization(smiles, targetContainerId, clickedBox) {
         const container = document.getElementById(targetContainerId);

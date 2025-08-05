@@ -278,6 +278,11 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
         
         moles_required = moles_needed / step_yield
 
+        # Use stoichiometric coefficients in calculations 
+        # Get the product's coefficient, defaulting to 1 if not present
+        product_coeff = step['product'].get('coeff', 1)
+        if product_coeff == 0: product_coeff = 1
+
         # Process each reactant
         for reactant in step['reactants']:
             reactant_smiles = reactant['smiles']
@@ -294,7 +299,9 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
                 reactant_mol = Chem.MolFromSmiles(reactant_smiles)
                 if reactant_mol:
                     reactant_mw = Descriptors.MolWt(reactant_mol)
-                    grams_required = moles_required * reactant_mw
+                    reactant_coeff = reactant.get('coeff', 1)
+                    moles_of_reactant_required = moles_required * (reactant_coeff / product_coeff)
+                    grams_required = moles_of_reactant_required * reactant_mw
                     required_amount[reactant_smiles] += grams_required
                 continue
 
@@ -307,7 +314,11 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
                 continue
                 
             reactant_mw = Descriptors.MolWt(reactant_mol)
-            grams_required_for_step = moles_required * reactant_mw
+            reactant_coeff = reactant.get('coeff', 1) # Get reactant coefficient
+            
+            # Stoichiometrically adjusted moles of reactant required for this step
+            moles_of_reactant_required = moles_required * (reactant_coeff / product_coeff)
+            grams_required_for_step = moles_of_reactant_required * reactant_mw
             
             # Add to total required amount for this starting material
             if reactant_smiles not in required_amount:
@@ -350,24 +361,6 @@ def analyze_route_cost_and_sourcing(route_steps: list, target_amount_g: float = 
     num_starting_materials = len(sourcing_details)
     num_steps = len(route_steps)
     
-    # return {
-    #     "total_cost": round(total_cost, 2),
-    #     "sourcing_details": sourcing_details,
-    #     "analysis_summary": {
-    #         "number_of_steps": num_steps,
-    #         "starting_materials_required": num_starting_materials,
-    #         "target_amount_g": target_amount_g,
-    #         "total_estimated_cost_usd": round(total_cost, 2)
-    #     },
-    #     "assumptions": [
-    #         f"Cost analysis for {target_amount_g}g of final product",
-    #         "Assumes 1:1 stoichiometry unless otherwise specified",
-    #         "Default yield of 85% per step if not specified",
-    #         "Prices are estimates based on typical chemical vendor pricing",
-    #         "Actual prices may vary significantly based on quantity, vendor, and market conditions"
-    #     ],
-    #     "analysis_notes": analysis_notes
-    # }
     return {
         "total_cost": round(total_cost, 2),
         "sourcing_details": sourcing_details,

@@ -13,6 +13,9 @@ from utils.yield_optimizer import AdvancedYieldPredictor
 import requests
 import json
 from urllib.parse import quote
+from utils.balance_reaction import balance_chemical_equation, count_atoms
+import re
+from collections import Counter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,7 +76,7 @@ def resolve_molecule_identifier(identifier: str) -> str | None:
                 return smiles
             else:
                 logger.warning(f"PubChem found compound for '{identifier}' (CID: {compound.cid}) but no SMILES available")
-                # As a last resort, try a direct API call with correct property names
+                # try a direct API call with correct property names
                 try:
                     logger.info(f"Attempting direct API call for CID: {compound.cid}")
                     import requests
@@ -480,7 +483,62 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                 reaction = metadata['reaction']
                 reactants_smiles = metadata['reactants_smiles']
                 product_smiles = metadata['product_smiles']
+                main_product_smiles = metadata['product_smiles'] 
                 reaction_smiles_str = metadata['reaction_smiles_str']
+
+                # Default to the original, incomplete reaction
+                all_reactants_smiles = metadata['reactants_smiles']
+                all_products_smiles = [metadata['product_smiles']]
+
+                # Get the full reaction details from the yield prediction result
+                yield_result = next((r for i, r in enumerate(yield_results) if reaction_smiles_list[i] == reaction_smiles_str), None)
+
+                if yield_result and 'optimized_reaction_smiles' in yield_result:
+                    optimized_reaction = yield_result['optimized_reaction_smiles']
+                    logger.info(f"Using optimized reaction for balancing: {optimized_reaction}")
+                    try:
+                        reactants_part, products_part = optimized_reaction.split('>>')
+                        all_reactants_smiles = [smi for smi in reactants_part.split('.') if smi]
+                        all_products_smiles = [smi for smi in products_part.split('.') if smi]
+                    except ValueError:
+                        logger.warning(f"Could not parse optimized reaction: {optimized_reaction}. Falling back to original.")
+                
+                # Initialize coefficients with a default of 1
+                reactant_coeffs = {smi: 1 for smi in all_reactants_smiles}
+                product_coeffs = {smi: 1 for smi in all_products_smiles}
+
+                # PRE-EMPTIVE CHECK: Verify atom conservation before attempting to balance
+                try:
+                    reactant_atoms = Counter()
+                    for smi in all_reactants_smiles:
+                        reactant_atoms.update(count_atoms(smi))
+
+                    product_atoms = Counter()
+                    for smi in all_products_smiles:
+                        product_atoms.update(count_atoms(smi))
+
+                    # If atoms are conserved, attempt to find integer coefficients
+                    if reactant_atoms.keys() == product_atoms.keys():
+                        logger.info("Atom sets match. Attempting to balance.")
+                        balanced_reactants, balanced_products = balance_chemical_equation(all_reactants_smiles, all_products_smiles)
+                        
+                        reactant_coeffs = {smi: coeff for coeff, smi in zip([br[0] for br in balanced_reactants], all_reactants_smiles)}
+                        product_coeffs = {smi: coeff for coeff, smi in zip([bp[0] for bp in balanced_products], all_products_smiles)}
+                        
+                        logger.info(f"Successfully balanced reaction for step {step_index + 1}.")
+                    else:
+                        # Atoms are not conserved; the equation is incomplete. Use 1:1 stoichiometry.
+                        missing_in_products = set(reactant_atoms.keys()) - set(product_atoms.keys())
+                        missing_in_reactants = set(product_atoms.keys()) - set(reactant_atoms.keys())
+                        logger.warning(
+                            f"Cannot balance: predicted reaction is incomplete. "
+                            f"Missing from products: {missing_in_products}. "
+                            f"Missing from reactants: {missing_in_reactants}. "
+                            f"Defaulting to 1:1 stoichiometry for all components."
+                        )
+                except Exception as e:
+                    logger.warning(f"Balancing check failed: {e}. Defaulting to 1:1 stoichiometry.")
+                
                 predicted_condition_info = predicted_conditions.get(reaction_smiles_str, {})
                 
                 # Format conditions string
@@ -525,16 +583,7 @@ def plan_synthesis_route(target_identifier: str) -> dict:
 
                 route_description_for_eval.append(f"Step {step_index + 1}: {step_details.get('title')} (Yield: {yield_value:.1f}%)")
 
-                # route_info["steps"].append({
-                #     "step_number": step_index + 1,
-                #     "title": step_details.get("title", "Unnamed Reaction"),
-                #     "yield": yield_value,
-                #     "reagents_conditions": step_details.get("conditions", "Not specified"),
-                #     "source_notes": step_details.get("notes", "No specific notes available."),
-                #     "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
-                #     "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
-                #     "reaction_image_url": image_url 
-                # })
+                byproducts = [smi for smi in all_products_smiles if smi != main_product_smiles]
 
                 route_info["steps"].append({
                     "step_number": step_index + 1,
@@ -543,10 +592,25 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                     "reagents_conditions": predicted_conditions_str, 
                     "predicted_conditions": predicted_condition_info, 
                     "source_notes": step_details.get("notes", "No specific notes available."),
-                    "product": {"smiles": product_smiles, "formula": get_formula_from_smiles(product_smiles)},
-                    "reactants": [{"smiles": smi, "formula": get_formula_from_smiles(smi)} for smi in reactants_smiles],
+                    # The main product of this step
+                    "product": {
+                        "smiles": main_product_smiles, 
+                        "formula": get_formula_from_smiles(main_product_smiles),
+                        "coeff": product_coeffs.get(main_product_smiles, 1)
+                    },
+                    # All reactants needed for the reaction
+                    "reactants": [{
+                        "smiles": smi, 
+                        "formula": get_formula_from_smiles(smi),
+                        "coeff": reactant_coeffs.get(smi, 1)
+                    } for smi in all_reactants_smiles],
+                    "byproducts": [{
+                        "smiles": smi,
+                        "formula": get_formula_from_smiles(smi),
+                        "coeff": product_coeffs.get(smi, 1)
+                    } for smi in byproducts],
                     "reaction_image_url": image_url,
-                    "optimized_reaction_smiles": result.get('optimized_reaction_smiles', reaction_smiles_str)  # Include full reaction
+                    "optimized_reaction_smiles": yield_result.get('optimized_reaction_smiles', reaction_smiles_str) if yield_result else reaction_smiles_str
                 })
             
             # Calculate overall yield from individual step yields
@@ -589,47 +653,3 @@ def plan_synthesis_route(target_identifier: str) -> dict:
 
     logger.info(f"Successfully processed and returning {len(routes_data)} routes")
     return {"routes": routes_data}
-
-# def generate_hypothetical_route(suggestion: str, existing_routes: list, target_smiles: str) -> dict | None:
-#     """
-#     Uses an LLM to generate a new, hypothetical synthesis route based on user suggestion.
-#     """
-#     logger.info(f"Generating hypothetical route for '{target_smiles}' based on suggestion: '{suggestion}'")
-#     try:
-#         # Format existing routes for the prompt context
-#         context_str = json.dumps(existing_routes, indent=2)
-        
-#         prompt = format_prompt(
-#             "propose_new_route",  # You'll need to create this prompt template
-#             user_suggestion=suggestion,
-#             target_molecule_smiles=target_smiles,
-#             existing_routes_json=context_str
-#         )
-#         if not prompt:
-#             logger.error("Could not format the 'propose_new_route' prompt.")
-#             return None
-
-#         # Call the LLM
-#         response = generate_text(prompt, temperature=0.6)
-#         if not response:
-#             logger.warning("LLM returned an empty response for hypothetical route.")
-#             return None
-
-#         # Clean and parse the JSON response from the LLM
-#         cleaned_response = response.strip().replace('```json', '').replace('```', '').strip()
-#         new_route_data = json.loads(cleaned_response)
-
-#         # Basic validation of the LLM output
-#         if "id" in new_route_data and "steps" in new_route_data:
-#             logger.info("Successfully generated and parsed a new hypothetical route.")
-#             return {"new_route": new_route_data}
-#         else:
-#             logger.error(f"LLM output was malformed: {cleaned_response}")
-#             return None
-
-#     except json.JSONDecodeError:
-#         logger.error(f"Failed to decode LLM response into JSON. Response: {response}")
-#         return None
-#     except Exception as e:
-#         logger.error(f"An error occurred during hypothetical route generation: {e}", exc_info=True)
-#         return None
