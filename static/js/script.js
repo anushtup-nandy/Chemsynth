@@ -33,6 +33,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitNewRouteBtn = document.getElementById('submit-new-route-btn');
     const newRouteSuggestionInput = document.getElementById('new-route-suggestion-input');
 
+    // --- Selectors for Save/Open Project --- 
+    const saveProjectBtn = document.getElementById('save-project-btn');
+    const openProjectBtn = document.getElementById('open-project-btn');
+    const projectFileInput = document.getElementById('project-file-input');
+
     // --- Initial State Setup ---
     updateProgress(0);
     setupTabControls();
@@ -43,6 +48,13 @@ document.addEventListener('DOMContentLoaded', function() {
     newRouteButton.addEventListener('click', handleNewRouteClick);
     cancelNewRouteBtn.addEventListener('click', () => newRouteModal.classList.add('hidden'));
     submitNewRouteBtn.addEventListener('click', handleNewRouteSubmit);
+
+    // --- Event listeners for Save/Open
+    saveProjectBtn.addEventListener('click', handleSaveProject);
+    openProjectBtn.addEventListener('click', handleOpenProject);
+    projectFileInput.addEventListener('change', loadProjectFromFile);
+
+    // --- Dynamic event listeners for expanding reactants/visualizations ---
     routeContentContainer.addEventListener('click', function(e) {
         if (e.target.matches('.expand-reactant-btn')) {
             e.preventDefault();
@@ -62,6 +74,126 @@ document.addEventListener('DOMContentLoaded', function() {
             handleExpandVisualization(smiles, targetContainerId, expandableBox);
         }
     });
+
+    // ---  Project Save/Load ---
+    function handleSaveProject() {
+        if (!currentTargetSMILES) {
+            alert("There is no active project to save. Please search for a molecule first.");
+            return;
+        }
+
+        // 1. Gather all state data into a single object
+        const projectData = {
+            savedAt: new Date().toISOString(),
+            // Core data
+            literatureResults: literatureResults,
+            synthesisRoutesData: synthesisRoutesData,
+            sourcingData: sourcingData,
+            currentTargetSMILES: currentTargetSMILES,
+            // UI state for better restoration
+            targetIdentifier: targetMoleculeInput.value,
+            searchKeywords: searchTermsInput.value,
+            targetMoleculeName: document.getElementById('project-target-molecule-name').textContent,
+        };
+
+        // 2. Convert to a JSON string
+        const jsonString = JSON.stringify(projectData, null, 2); // Pretty-print the JSON
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        // 3. Create a temporary link to trigger the download
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (projectData.targetIdentifier || 'untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `chemsynth_project_${safeName}.json`;
+        document.body.appendChild(a);
+        a.click();
+
+        // 4. Clean up
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Visual feedback
+        const originalText = saveProjectBtn.innerHTML;
+        saveProjectBtn.innerHTML = '<i class="fas fa-check mr-2"></i> Saved!';
+        setTimeout(() => {
+            saveProjectBtn.innerHTML = originalText;
+        }, 2000);
+    }
+
+    /**
+     * Triggers the hidden file input dialog to allow the user to select a project file.
+     */
+    function handleOpenProject() {
+        projectFileInput.click();
+    }
+
+    /**
+     * Reads the selected JSON file and initiates the UI restoration process.
+     * @param {Event} event - The file input change event.
+     */
+    function loadProjectFromFile(event) {
+        const file = event.target.files[0];
+        if (!file) {
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const projectData = JSON.parse(e.target.result);
+                loadProjectDataIntoUI(projectData);
+            } catch (error) {
+                console.error("Error parsing project file:", error);
+                alert("Failed to load project. The file may be corrupted or not a valid ChemSynthAI project file.");
+            }
+        };
+        reader.readAsText(file);
+        
+        // Reset the input so the 'change' event fires again if the same file is selected
+        event.target.value = null; 
+    }
+
+    /**
+     * Restores the entire application state and UI from a project data object.
+     * @param {object} projectData - The parsed data from a saved project JSON file.
+     */
+    function loadProjectDataIntoUI(projectData) {
+        console.log("Loading project data...", projectData);
+        resetUI();
+
+        // 1. Restore global state variables
+        literatureResults = projectData.literatureResults || [];
+        synthesisRoutesData = projectData.synthesisRoutesData || [];
+        sourcingData = projectData.sourcingData || {};
+        currentTargetSMILES = projectData.currentTargetSMILES || '';
+
+        // 2. Restore UI elements
+        targetMoleculeInput.value = projectData.targetIdentifier || '';
+        searchTermsInput.value = projectData.searchKeywords || '';
+        document.getElementById('project-target-molecule-name').textContent = projectData.targetMoleculeName || 'Project Loaded';
+        document.getElementById('project-target-molecule-formula').textContent = projectData.currentTargetSMILES || '';
+        
+        // 3. Re-render all sections with the loaded data
+        renderLiteratureResults(literatureResults);
+        
+        if (synthesisRoutesData.length > 0) {
+            const firstRouteId = synthesisRoutesData[0].id;
+            synthesisContent.classList.remove('hidden');
+            renderRouteTabs(synthesisRoutesData, firstRouteId);
+            renderSingleRoute(synthesisRoutesData[0]);
+
+            // Since we have all data, we can directly render other tabs' content.
+            // The tab switching logic will handle showing/hiding them.
+            renderSourcingInfo(firstRouteId);
+            renderCostAnalysis(firstRouteId);
+            renderKnowledgeGraph(firstRouteId);
+        }
+        
+        // 4. Update progress and switch to a relevant tab
+        updateProgress(5); // Mark all stages as complete
+        document.querySelector('.tab-link[data-tab="synthesis"]').click();
+    }
 
     // --- Main Handler Functions ---
     async function handleSearch(event) {
