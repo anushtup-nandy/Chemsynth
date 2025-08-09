@@ -19,9 +19,12 @@ from baybe.acquisition import (
     qExpectedImprovement,  # For batch acquisition
     qUpperConfidenceBound   # For batch acquisition
 )
+from rxn_insight.reaction import Reaction
+RXN_INSIGHT_AVAILABLE = True
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info("rxn-insight successfully imported")
 
 try:
     from utils.yield_optimizer import AdvancedYieldPredictor, merge_reaction_with_conditions
@@ -83,6 +86,100 @@ def safe_predict_yield(oracle: AdvancedYieldPredictor, full_reaction_smiles: str
     except Exception as e:
         logger.error(f"Yield prediction failed for '{full_reaction_smiles}': {e}", exc_info=True)
         return 0.0
+    
+def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 20) -> tuple:
+    """
+    Use rxn-insight to get additional condition recommendations based on 
+    reaction classification and database similarity.
+    
+    Returns: (conditions_dict, metadata)
+    """
+    if not RXN_INSIGHT_AVAILABLE:
+        return {}, {}
+    
+    try:
+        logger.info(f"Using rxn-insight to analyze reaction: {naked_reaction_smiles}")
+        
+        # Create Reaction object from SMILES
+        rxn = Reaction(naked_reaction_smiles)
+        
+        # Get reaction info and classification
+        reaction_info = rxn.get_reaction_info()
+        logger.info(f"Reaction classification: {reaction_info.get('reaction_class', 'Unknown')}")
+        
+        # Extract conditions from reaction info if available
+        additional_solvents = set()
+        additional_reagents = set()
+        additional_catalysts = set()
+        temperature_suggestions = []
+        
+        # Try to extract conditions from reaction_info
+        if isinstance(reaction_info, dict):
+            # Look for condition-related keys in the reaction info
+            conditions_data = reaction_info.get('conditions', {})
+            similar_reactions = reaction_info.get('similar_reactions', [])
+            
+            # Extract from direct conditions if available
+            if isinstance(conditions_data, dict):
+                if 'solvents' in conditions_data:
+                    additional_solvents.update(conditions_data['solvents'])
+                if 'catalysts' in conditions_data:
+                    additional_catalysts.update(conditions_data['catalysts'])
+                if 'reagents' in conditions_data:
+                    additional_reagents.update(conditions_data['reagents'])
+                if 'temperatures' in conditions_data:
+                    temperature_suggestions.extend(conditions_data['temperatures'])
+            
+            # Extract from similar reactions if available
+            for similar_rxn in similar_reactions[:10]:  # Limit to top 10 similar
+                if isinstance(similar_rxn, dict):
+                    rxn_conditions = similar_rxn.get('conditions', {})
+                    if 'solvent' in rxn_conditions and rxn_conditions['solvent']:
+                        additional_solvents.add(rxn_conditions['solvent'])
+                    if 'catalyst' in rxn_conditions and rxn_conditions['catalyst']:
+                        additional_catalysts.add(rxn_conditions['catalyst'])
+                    if 'reagent' in rxn_conditions and rxn_conditions['reagent']:
+                        additional_reagents.add(rxn_conditions['reagent'])
+                    if 'temperature' in rxn_conditions:
+                        try:
+                            temp_val = float(rxn_conditions['temperature'])
+                            if 0 <= temp_val <= 300:
+                                temperature_suggestions.append(temp_val)
+                        except (ValueError, TypeError):
+                            pass
+        
+        # Add some common conditions based on reaction class if available
+        reaction_class = reaction_info.get('reaction_class', '').lower()
+        if 'grignard' in reaction_class or 'organometallic' in reaction_class:
+            additional_solvents.update(['THF', 'diethyl ether', 'toluene'])
+            additional_reagents.update(['MgBr2', 'LiCl'])
+        elif 'suzuki' in reaction_class or 'cross-coupling' in reaction_class:
+            additional_catalysts.update(['Pd(PPh3)4', 'Pd(dppf)Cl2'])
+            additional_solvents.update(['DMF', 'toluene', 'dioxane'])
+        elif 'aldol' in reaction_class:
+            additional_catalysts.update(['LDA', 'NaHMDS'])
+            additional_solvents.update(['THF', 'DMF'])
+        
+        metadata = {
+            'reaction_class': reaction_info.get('reaction_class', 'Unknown'),
+            'functional_groups': reaction_info.get('functional_groups', []),
+            'ring_changes': reaction_info.get('ring_changes', {}),
+            'analysis_successful': True
+        }
+        
+        logger.info(f"rxn-insight found {len(additional_solvents)} solvents, "
+                   f"{len(additional_reagents)} reagents, {len(additional_catalysts)} catalysts")
+        
+        return {
+            'solvents': list(additional_solvents),
+            'reagents': list(additional_reagents), 
+            'catalysts': list(additional_catalysts),
+            'temperatures': temperature_suggestions
+        }, metadata
+        
+    except Exception as e:
+        logger.warning(f"rxn-insight condition extraction failed: {e}")
+        return {}, {'analysis_successful': False, 'error': str(e)}
 
 def create_bayesian_campaign(searchspace: SearchSpace, use_random_for_initial: bool = True, 
                            acquisition_type: str = "EI", batch_size: int = 1) -> Optional[Campaign]:
@@ -242,24 +339,27 @@ def run_true_bayesian_optimization(
     num_iterations: int = 15,
     num_random_init: int = 5,
     use_adaptive_strategy: bool = True,
-    initial_batch_size: int = 2
+    initial_batch_size: int = 2,
+    use_rxn_insight: bool = True  # New parameter to enable/disable rxn-insight
 ) -> Dict[str, Any]:
     """
-    Enhanced Bayesian optimization with advanced acquisition functions and batch optimization.
+    Enhanced Bayesian optimization with rxn-insight integration for expanded condition space.
     """
-    logger.info(f"Starting ADVANCED Bayesian Optimization for: {naked_reaction_smiles}")
+    logger.info(f"Starting ENHANCED Bayesian Optimization for: {naked_reaction_smiles}")
     
     if not naked_reaction_smiles or not naked_reaction_smiles.strip():
         return {"error": "Invalid or empty reaction SMILES provided"}
     
-    # Initialize Oracle (unchanged)
+    # Initialize Oracle
     oracle = initialize_oracle()
     if oracle is None:
         return {"error": "Could not initialize the simulation oracle"}
 
-    # Generate Search Space (unchanged section)
+    # ENHANCED Generate Search Space with rxn-insight integration
     try:
-        logger.info(f"Generating {num_initial_candidates} initial candidate conditions...")
+        logger.info(f"Generating enhanced search space...")
+        
+        # Get initial conditions from existing RCR model
         initial_conditions, _ = oracle.condition_predictor.get_n_conditions(
             naked_reaction_smiles, n=num_initial_candidates, return_scores=True
         )
@@ -267,7 +367,7 @@ def run_true_bayesian_optimization(
         if not initial_conditions:
             return {"error": "Could not generate initial candidate conditions"}
 
-        # Process conditions (unchanged)
+        # Process RCR model conditions
         temps = []
         solvents = set()
         reagents = set()
@@ -286,22 +386,67 @@ def run_true_bayesian_optimization(
                 if catalyst and isinstance(catalyst, str) and catalyst.strip():
                     catalysts.add(catalyst.strip())
         
-        solvents = sorted(list(solvents)) or ["THF", "DCM"]
-        reagents = sorted(list(reagents)) or ["None"]
-        catalysts = sorted(list(catalysts)) or ["None"]
+        # ENHANCEMENT: Add rxn-insight conditions to expand search space
+        rxn_insight_metadata = {}
+        if use_rxn_insight:
+            try:
+                rxn_insight_conditions, rxn_insight_metadata = get_rxn_insight_conditions(
+                    naked_reaction_smiles, n_conditions=30
+                )
+                
+                if rxn_insight_conditions:
+                    # Merge rxn-insight conditions with existing ones
+                    solvents.update(rxn_insight_conditions.get('solvents', []))
+                    reagents.update(rxn_insight_conditions.get('reagents', []))
+                    catalysts.update(rxn_insight_conditions.get('catalysts', []))
+                    temps.extend(rxn_insight_conditions.get('temperatures', []))
+                    
+                    logger.info(f"rxn-insight expanded search space - "
+                               f"Reaction class: {rxn_insight_metadata.get('reaction_class', 'Unknown')}")
+                    logger.info(f"Total conditions now: {len(solvents)} solvents, "
+                               f"{len(reagents)} reagents, {len(catalysts)} catalysts")
+                
+            except Exception as e:
+                logger.warning(f"rxn-insight integration failed, continuing with RCR-only conditions: {e}")
         
-        if not temps:
-            temps = [20.0, 80.0]
+        # Apply sensible defaults and filtering
+        solvents = sorted([s for s in solvents if s and len(s) < 50])[:20]  # Limit to 20 most reasonable solvents
+        reagents = sorted([r for r in reagents if r and len(r) < 50])[:15]   # Limit reagents
+        catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:15] # Limit catalysts
         
-        temp_min, temp_max = min(temps), max(temps)
-        if temp_max - temp_min < 5.0:
-            temp_max = temp_min + 20.0
+        # Add "None" options for optional components
+        if "None" not in reagents:
+            reagents.append("None")
+        if "None" not in catalysts:
+            catalysts.append("None")
+            
+        # Ensure we have fallback options
+        if not solvents:
+            solvents = ["THF", "DCM", "toluene", "DMF"]
+        if not reagents:
+            reagents = ["None"]
+        if not catalysts:
+            catalysts = ["None"]
+        
+        # Enhanced temperature range
+        if temps:
+            temps = [t for t in temps if 0 <= t <= 300]  # Filter reasonable temperatures
+            temp_min, temp_max = min(temps), max(temps)
+            if temp_max - temp_min < 10.0:  # Ensure reasonable range
+                temp_center = (temp_min + temp_max) / 2
+                temp_min = max(0, temp_center - 25)
+                temp_max = min(300, temp_center + 25)
+        else:
+            temp_min, temp_max = 20.0, 100.0
+        
+        logger.info(f"Final search space: {len(solvents)} solvents, {len(reagents)} reagents, "
+                   f"{len(catalysts)} catalysts, temp range: {temp_min:.1f}-{temp_max:.1f}°C")
 
     except Exception as e:
-        logger.error(f"Error generating search space: {e}", exc_info=True)
+        logger.error(f"Error generating enhanced search space: {e}", exc_info=True)
         return {"error": f"Failed to generate search space: {e}"}
 
-    # Create Search Space (unchanged)
+    # Create Search Space (keep existing logic but log the enhanced space)
     try:
         parameters = []
         
@@ -318,6 +463,7 @@ def run_true_bayesian_optimization(
         ))
 
         searchspace = SearchSpace.from_product(parameters)
+        logger.info(f"Created search space with {len(parameters)} parameters")
 
     except Exception as e:
         logger.error(f"Error creating search space: {e}", exc_info=True)
@@ -520,6 +666,7 @@ def run_true_bayesian_optimization(
                 "catalysts": catalysts,
                 "temperature_range": [round(temp_min, 1), round(temp_max, 1)]
             },
+            "rxn_insight_analysis": rxn_insight_metadata,  # NEW: Add reaction classification info
             "performance_metrics": {
                 "total_evaluations": len(optimization_history),
                 "random_phase_evaluations": len(random_yields),
@@ -527,7 +674,8 @@ def run_true_bayesian_optimization(
                 "avg_random_yield": round(np.mean(random_yields), 2) if random_yields else 0,
                 "avg_bayesian_yield": round(np.mean(bayesian_yields), 2) if bayesian_yields else 0,
                 "acquisition_performance": acq_performance,
-                "improvement_over_random": round(np.mean(bayesian_yields) - np.mean(random_yields), 2) if bayesian_yields and random_yields else 0
+                "improvement_over_random": round(np.mean(bayesian_yields) - np.mean(random_yields), 2) if bayesian_yields and random_yields else 0,
+                "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}"
             }
         }
         
@@ -541,17 +689,18 @@ if __name__ == '__main__':
     
     test_reaction = "Cl[Si](Cl)(Cl)Cl.c1ccccc1[Mg]Br>>Cl[Si](Cl)(Cl)c1ccccc1"
     
-    print("\n" + "="*60)
-    print(f"RUNNING TRUE BAYESIAN OPTIMIZATION FOR:\n{test_reaction}")
-    print("="*60 + "\n")
+    print("\n" + "="*70)
+    print(f"RUNNING ENHANCED BAYESIAN OPTIMIZATION WITH RXN-INSIGHT FOR:\n{test_reaction}")
+    print("="*70 + "\n")
     
     results = run_true_bayesian_optimization(
-        naked_reaction_smiles="Cl[Si](Cl)(Cl)Cl.c1ccccc1[Mg]Br>>Cl[Si](Cl)(Cl)c1ccccc1",
-        num_initial_candidates=20,
-        num_iterations=15,
-        num_random_init=5,
-        use_adaptive_strategy=True,  # Enable adaptive acquisition
-        initial_batch_size=2        # Start with batch optimization
+        naked_reaction_smiles=test_reaction,
+        num_initial_candidates=25,      # Increased for larger search space
+        num_iterations=20,              # More iterations to explore enhanced space
+        num_random_init=6,              # More random exploration
+        use_adaptive_strategy=True,
+        initial_batch_size=3,           # Larger batches for efficiency
+        use_rxn_insight=True            # Enable rxn-insight integration
     )
 
     import json
