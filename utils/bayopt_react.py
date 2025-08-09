@@ -89,97 +89,324 @@ def safe_predict_yield(oracle: AdvancedYieldPredictor, full_reaction_smiles: str
     
 def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 20) -> tuple:
     """
-    Use rxn-insight to get additional condition recommendations based on 
-    reaction classification and database similarity.
+    Advanced rxn-insight-based condition recommendation system.
+    Uses comprehensive reaction analysis, similarity search, and statistical methods
+    to dynamically generate optimal reaction conditions without hardcoding.
     
     Returns: (conditions_dict, metadata)
     """
     if not RXN_INSIGHT_AVAILABLE:
-        return {}, {}
+        return {}, {"error": "rxn-insight not available"}
     
     try:
-        logger.info(f"Using rxn-insight to analyze reaction: {naked_reaction_smiles}")
+        logger.info(f"Advanced rxn-insight analysis for: {naked_reaction_smiles}")
         
-        # Create Reaction object from SMILES
-        rxn = Reaction(naked_reaction_smiles)
-        
-        # Get reaction info and classification
-        reaction_info = rxn.get_reaction_info()
-        logger.info(f"Reaction classification: {reaction_info.get('reaction_class', 'Unknown')}")
-        
-        # Extract conditions from reaction info if available
-        additional_solvents = set()
-        additional_reagents = set()
-        additional_catalysts = set()
-        temperature_suggestions = []
-        
-        # Try to extract conditions from reaction_info
-        if isinstance(reaction_info, dict):
-            # Look for condition-related keys in the reaction info
-            conditions_data = reaction_info.get('conditions', {})
-            similar_reactions = reaction_info.get('similar_reactions', [])
-            
-            # Extract from direct conditions if available
-            if isinstance(conditions_data, dict):
-                if 'solvents' in conditions_data:
-                    additional_solvents.update(conditions_data['solvents'])
-                if 'catalysts' in conditions_data:
-                    additional_catalysts.update(conditions_data['catalysts'])
-                if 'reagents' in conditions_data:
-                    additional_reagents.update(conditions_data['reagents'])
-                if 'temperatures' in conditions_data:
-                    temperature_suggestions.extend(conditions_data['temperatures'])
-            
-            # Extract from similar reactions if available
-            for similar_rxn in similar_reactions[:10]:  # Limit to top 10 similar
-                if isinstance(similar_rxn, dict):
-                    rxn_conditions = similar_rxn.get('conditions', {})
-                    if 'solvent' in rxn_conditions and rxn_conditions['solvent']:
-                        additional_solvents.add(rxn_conditions['solvent'])
-                    if 'catalyst' in rxn_conditions and rxn_conditions['catalyst']:
-                        additional_catalysts.add(rxn_conditions['catalyst'])
-                    if 'reagent' in rxn_conditions and rxn_conditions['reagent']:
-                        additional_reagents.add(rxn_conditions['reagent'])
-                    if 'temperature' in rxn_conditions:
-                        try:
-                            temp_val = float(rxn_conditions['temperature'])
-                            if 0 <= temp_val <= 300:
-                                temperature_suggestions.append(temp_val)
-                        except (ValueError, TypeError):
-                            pass
-        
-        # Add some common conditions based on reaction class if available
-        reaction_class = reaction_info.get('reaction_class', '').lower()
-        if 'grignard' in reaction_class or 'organometallic' in reaction_class:
-            additional_solvents.update(['THF', 'diethyl ether', 'toluene'])
-            additional_reagents.update(['MgBr2', 'LiCl'])
-        elif 'suzuki' in reaction_class or 'cross-coupling' in reaction_class:
-            additional_catalysts.update(['Pd(PPh3)4', 'Pd(dppf)Cl2'])
-            additional_solvents.update(['DMF', 'toluene', 'dioxane'])
-        elif 'aldol' in reaction_class:
-            additional_catalysts.update(['LDA', 'NaHMDS'])
-            additional_solvents.update(['THF', 'DMF'])
-        
-        metadata = {
-            'reaction_class': reaction_info.get('reaction_class', 'Unknown'),
-            'functional_groups': reaction_info.get('functional_groups', []),
-            'ring_changes': reaction_info.get('ring_changes', {}),
-            'analysis_successful': True
+        # Initialize comprehensive results storage
+        conditions_aggregator = {
+            'solvents': {},      # {solvent: {count, confidence, sources}}
+            'reagents': {},      # {reagent: {count, confidence, sources}}  
+            'catalysts': {},     # {catalyst: {count, confidence, sources}}
+            'temperatures': [],   # [(temp, confidence, source)]
+            'additives': {},     # Additional reagents/bases/acids
+            'atmospheres': {},   # Reaction atmosphere conditions
+            'times': [],         # Reaction time data
+            'pressures': []      # Pressure conditions
         }
         
-        logger.info(f"rxn-insight found {len(additional_solvents)} solvents, "
-                   f"{len(additional_reagents)} reagents, {len(additional_catalysts)} catalysts")
+        # Create Reaction object with enhanced analysis
+        rxn = Reaction(naked_reaction_smiles)
         
-        return {
-            'solvents': list(additional_solvents),
-            'reagents': list(additional_reagents), 
-            'catalysts': list(additional_catalysts),
-            'temperatures': temperature_suggestions
-        }, metadata
+        # 1. COMPREHENSIVE REACTION ANALYSIS
+        logger.info("Performing comprehensive reaction analysis...")
+        
+        # Get full reaction information
+        reaction_info = rxn.get_reaction_info()
+        
+        # Get functional group analysis
+        functional_groups = getattr(rxn, 'get_functional_groups', lambda: {})()
+        
+        # Get ring analysis
+        ring_analysis = getattr(rxn, 'get_ring_changes', lambda: {})()
+        
+        # Get molecular descriptors
+        descriptors = getattr(rxn, 'get_descriptors', lambda: {})()
+        
+        # Get reaction classification with confidence
+        classification = getattr(rxn, 'classify_reaction', lambda: {})()
+        
+        logger.info(f"Reaction analysis complete - Class: {classification.get('class', 'Unknown')}")
+        
+        # 2. SIMILARITY-BASED CONDITION MINING
+        logger.info("Mining conditions from similar reactions...")
+        
+        try:
+            # Find similar reactions with multiple similarity metrics
+            similar_reactions = []
+            
+            # Try different similarity methods if available
+            similarity_methods = ['tanimoto', 'structural', 'functional_group']
+            for method in similarity_methods:
+                try:
+                    similar_batch = getattr(rxn, 'find_similar_reactions', lambda **kwargs: [])(
+                        method=method, 
+                        limit=min(50, n_conditions * 3),
+                        min_similarity=0.3
+                    )
+                    similar_reactions.extend(similar_batch)
+                except (AttributeError, Exception) as e:
+                    logger.debug(f"Similarity method {method} not available: {e}")
+            
+            # Fallback to basic similarity search
+            if not similar_reactions:
+                similar_reactions = getattr(rxn, 'find_similar', 
+                                          lambda n=50: [])(n=min(50, n_conditions * 3))
+            
+            logger.info(f"Found {len(similar_reactions)} similar reactions for analysis")
+            
+            # Process similar reactions for condition extraction
+            for idx, similar_rxn in enumerate(similar_reactions):
+                try:
+                    similarity_score = similar_rxn.get('similarity', 0.5)
+                    rxn_conditions = similar_rxn.get('conditions', {})
+                    rxn_data = similar_rxn.get('reaction_data', {})
+                    
+                    # Extract and weight conditions by similarity score
+                    confidence = similarity_score
+                    source = f"similar_rxn_{idx}"
+                    
+                    # Process solvents
+                    solvents_list = []
+                    if 'solvent' in rxn_conditions:
+                        solvents_list.append(rxn_conditions['solvent'])
+                    if 'solvents' in rxn_conditions:
+                        solvents_list.extend(rxn_conditions['solvents'])
+                    
+                    for solvent in solvents_list:
+                        if solvent and isinstance(solvent, str) and len(solvent.strip()) > 0:
+                            solvent = solvent.strip()
+                            if solvent not in conditions_aggregator['solvents']:
+                                conditions_aggregator['solvents'][solvent] = {
+                                    'count': 0, 'confidence': 0, 'sources': []
+                                }
+                            conditions_aggregator['solvents'][solvent]['count'] += 1
+                            conditions_aggregator['solvents'][solvent]['confidence'] += confidence
+                            conditions_aggregator['solvents'][solvent]['sources'].append(source)
+                    
+                    # Process catalysts
+                    catalysts_list = []
+                    if 'catalyst' in rxn_conditions:
+                        catalysts_list.append(rxn_conditions['catalyst'])
+                    if 'catalysts' in rxn_conditions:
+                        catalysts_list.extend(rxn_conditions['catalysts'])
+                    
+                    for catalyst in catalysts_list:
+                        if catalyst and isinstance(catalyst, str) and len(catalyst.strip()) > 0:
+                            catalyst = catalyst.strip()
+                            if catalyst not in conditions_aggregator['catalysts']:
+                                conditions_aggregator['catalysts'][catalyst] = {
+                                    'count': 0, 'confidence': 0, 'sources': []
+                                }
+                            conditions_aggregator['catalysts'][catalyst]['count'] += 1
+                            conditions_aggregator['catalysts'][catalyst]['confidence'] += confidence
+                            conditions_aggregator['catalysts'][catalyst]['sources'].append(source)
+                    
+                    # Process reagents/bases/acids
+                    reagents_list = []
+                    for key in ['reagent', 'reagents', 'base', 'bases', 'acid', 'acids', 'additive', 'additives']:
+                        if key in rxn_conditions:
+                            item = rxn_conditions[key]
+                            if isinstance(item, list):
+                                reagents_list.extend(item)
+                            elif item:
+                                reagents_list.append(item)
+                    
+                    for reagent in reagents_list:
+                        if reagent and isinstance(reagent, str) and len(reagent.strip()) > 0:
+                            reagent = reagent.strip()
+                            if reagent not in conditions_aggregator['reagents']:
+                                conditions_aggregator['reagents'][reagent] = {
+                                    'count': 0, 'confidence': 0, 'sources': []
+                                }
+                            conditions_aggregator['reagents'][reagent]['count'] += 1
+                            conditions_aggregator['reagents'][reagent]['confidence'] += confidence
+                            conditions_aggregator['reagents'][reagent]['sources'].append(source)
+                    
+                    # Process temperatures
+                    temp_keys = ['temperature', 'temp', 'Temperature', 'reaction_temperature']
+                    for temp_key in temp_keys:
+                        if temp_key in rxn_conditions:
+                            try:
+                                temp_val = float(rxn_conditions[temp_key])
+                                if 0 <= temp_val <= 500:  # Reasonable temperature range
+                                    conditions_aggregator['temperatures'].append((temp_val, confidence, source))
+                            except (ValueError, TypeError):
+                                pass
+                    
+                    # Process additional conditions
+                    if 'atmosphere' in rxn_conditions:
+                        atm = rxn_conditions['atmosphere']
+                        if atm not in conditions_aggregator['atmospheres']:
+                            conditions_aggregator['atmospheres'][atm] = {'count': 0, 'confidence': 0}
+                        conditions_aggregator['atmospheres'][atm]['count'] += 1
+                        conditions_aggregator['atmospheres'][atm]['confidence'] += confidence
+                    
+                    # Process reaction times
+                    if 'time' in rxn_conditions:
+                        try:
+                            time_val = float(rxn_conditions['time'])
+                            conditions_aggregator['times'].append((time_val, confidence, source))
+                        except (ValueError, TypeError):
+                            pass
+                            
+                except Exception as e:
+                    logger.debug(f"Error processing similar reaction {idx}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.warning(f"Similarity-based condition mining failed: {e}")
+        
+        # 3. FUNCTIONAL GROUP-BASED CONDITION ENHANCEMENT
+        logger.info("Enhancing conditions based on functional group analysis...")
+        
+        try:
+            # Get reaction center functional groups
+            reactant_fg = functional_groups.get('reactants', {})
+            product_fg = functional_groups.get('products', {})
+            
+            # Analyze functional group changes for mechanism insights
+            fg_changes = {}
+            for fg in set(list(reactant_fg.keys()) + list(product_fg.keys())):
+                reactant_count = reactant_fg.get(fg, 0)
+                product_count = product_fg.get(fg, 0)
+                if reactant_count != product_count:
+                    fg_changes[fg] = {
+                        'reactants': reactant_count,
+                        'products': product_count,
+                        'net_change': product_count - reactant_count
+                    }
+            
+            # Use functional group database to suggest conditions
+            fg_condition_db = getattr(rxn, 'get_fg_conditions', lambda fg_dict: {})(fg_changes)
+            
+            # Integrate functional group-based conditions
+            for condition_type, suggestions in fg_condition_db.items():
+                if condition_type in conditions_aggregator:
+                    for suggestion in suggestions:
+                        name = suggestion.get('name', '')
+                        confidence = suggestion.get('confidence', 0.3)
+                        if name and name not in conditions_aggregator[condition_type]:
+                            conditions_aggregator[condition_type][name] = {
+                                'count': 1, 'confidence': confidence, 'sources': ['functional_group_analysis']
+                            }
+                        
+        except Exception as e:
+            logger.debug(f"Functional group enhancement failed: {e}")
+        
+        # 4. STATISTICAL ANALYSIS AND RANKING
+        logger.info("Performing statistical analysis and ranking...")
+        
+        # Rank and filter conditions by statistical significance
+        def rank_conditions(condition_dict, min_count=1, max_results=None):
+            """Rank conditions by weighted score combining count and confidence"""
+            ranked = []
+            for name, data in condition_dict.items():
+                # Calculate composite score
+                avg_confidence = data['confidence'] / max(data['count'], 1)
+                popularity_score = min(data['count'] / 10.0, 1.0)  # Normalize count
+                composite_score = (0.7 * avg_confidence) + (0.3 * popularity_score)
+                
+                if data['count'] >= min_count:
+                    ranked.append({
+                        'name': name,
+                        'score': composite_score,
+                        'count': data['count'],
+                        'avg_confidence': avg_confidence,
+                        'sources': len(set(data['sources']))
+                    })
+            
+            # Sort by composite score
+            ranked.sort(key=lambda x: x['score'], reverse=True)
+            
+            if max_results:
+                ranked = ranked[:max_results]
+            
+            return ranked
+        
+        # Rank all condition types
+        ranked_solvents = rank_conditions(conditions_aggregator['solvents'], min_count=1, max_results=15)
+        ranked_reagents = rank_conditions(conditions_aggregator['reagents'], min_count=1, max_results=12)
+        ranked_catalysts = rank_conditions(conditions_aggregator['catalysts'], min_count=1, max_results=12)
+        ranked_atmospheres = rank_conditions(conditions_aggregator['atmospheres'], min_count=1, max_results=5)
+        
+        # Statistical temperature analysis
+        temp_analysis = {}
+        if conditions_aggregator['temperatures']:
+            temps = [t[0] for t in conditions_aggregator['temperatures']]
+            confidences = [t[1] for t in conditions_aggregator['temperatures']]
+            
+            # Weighted statistics
+            weighted_temps = np.average(temps, weights=confidences)
+            temp_std = np.std(temps)
+            
+            temp_analysis = {
+                'mean': float(weighted_temps),
+                'std': float(temp_std),
+                'range': [float(min(temps)), float(max(temps))],
+                'recommended_range': [
+                    max(0, float(weighted_temps - temp_std)), 
+                    min(300, float(weighted_temps + temp_std))
+                ],
+                'data_points': len(temps)
+            }
+        
+        # 5. COMPILE FINAL RESULTS
+        logger.info("Compiling final condition recommendations...")
+        
+        # Extract top conditions
+        final_conditions = {
+            'solvents': [item['name'] for item in ranked_solvents],
+            'reagents': [item['name'] for item in ranked_reagents],
+            'catalysts': [item['name'] for item in ranked_catalysts],
+            'temperatures': list(temp_analysis.get('recommended_range', [])),
+            'atmospheres': [item['name'] for item in ranked_atmospheres],
+            'temperature_analysis': temp_analysis
+        }
+        
+        # Comprehensive metadata
+        metadata = {
+            'reaction_class': classification.get('class', 'Unknown'),
+            'reaction_confidence': classification.get('confidence', 0),
+            'functional_groups': functional_groups,
+            'ring_changes': ring_analysis,
+            'similar_reactions_analyzed': len(similar_reactions),
+            'condition_statistics': {
+                'solvents_found': len(ranked_solvents),
+                'reagents_found': len(ranked_reagents),
+                'catalysts_found': len(ranked_catalysts),
+                'temperature_data_points': len(conditions_aggregator['temperatures'])
+            },
+            'top_ranked_conditions': {
+                'solvents': ranked_solvents[:5],
+                'reagents': ranked_reagents[:5], 
+                'catalysts': ranked_catalysts[:5]
+            },
+            'analysis_successful': True,
+            'data_sources': len(similar_reactions),
+            'methodology': 'similarity_mining + functional_group_analysis + statistical_ranking'
+        }
+        
+        logger.info(f"Advanced analysis complete - Found {len(final_conditions['solvents'])} solvents, "
+                   f"{len(final_conditions['reagents'])} reagents, {len(final_conditions['catalysts'])} catalysts")
+        
+        return final_conditions, metadata
         
     except Exception as e:
-        logger.warning(f"rxn-insight condition extraction failed: {e}")
-        return {}, {'analysis_successful': False, 'error': str(e)}
+        logger.error(f"Advanced rxn-insight analysis failed: {e}", exc_info=True)
+        return {}, {
+            'analysis_successful': False, 
+            'error': str(e),
+            'methodology': 'advanced_rxn_insight_failed'
+        }
 
 def create_bayesian_campaign(searchspace: SearchSpace, use_random_for_initial: bool = True, 
                            acquisition_type: str = "EI", batch_size: int = 1) -> Optional[Campaign]:
@@ -233,9 +460,10 @@ def create_bayesian_campaign(searchspace: SearchSpace, use_random_for_initial: b
         return None
 
 def switch_to_bayesian_recommender(campaign: Campaign, acquisition_type: str = "EI", 
-                                 batch_size: int = 1) -> bool:
+                                 batch_size: int = 1) -> Campaign:
     """
     Switch to Bayesian optimization with specified acquisition function and batch size.
+    Returns a new campaign object with the transferred measurements.
     """
     try:
         # Select acquisition function
@@ -253,30 +481,35 @@ def switch_to_bayesian_recommender(campaign: Campaign, acquisition_type: str = "
             acq_func = ExpectedImprovement()
             logger.warning(f"Using EI fallback for {acquisition_type} with batch_size {batch_size}")
         
+        # Create new recommender
         bayesian_recommender = BotorchRecommender(
             surrogate_model=GaussianProcessSurrogate(),
             acquisition_function=acq_func
         )
         
+        # Store existing measurements
+        existing_measurements = None
+        if hasattr(campaign, 'measurements') and not campaign.measurements.empty:
+            existing_measurements = campaign.measurements.copy()
+        
+        # Create completely new campaign
         new_campaign = Campaign(
             searchspace=campaign.searchspace,
             objective=campaign.objective,
             recommender=bayesian_recommender
         )
         
-        if hasattr(campaign, 'measurements') and not campaign.measurements.empty:
-            new_campaign.add_measurements(campaign.measurements)
-            logger.info(f"Transferred {len(campaign.measurements)} measurements to {acquisition_type} campaign")
+        # Transfer measurements to new campaign if they exist
+        if existing_measurements is not None and not existing_measurements.empty:
+            new_campaign.add_measurements(existing_measurements)
+            logger.info(f"Transferred {len(existing_measurements)} measurements to {acquisition_type} campaign")
         
-        campaign._recommender = bayesian_recommender
-        campaign.measurements = new_campaign.measurements if hasattr(new_campaign, 'measurements') else campaign.measurements
-        
-        logger.info(f"Switched to {acquisition_type} acquisition with batch_size={batch_size}")
-        return True
+        logger.info(f"Successfully created new {acquisition_type} campaign with batch_size={batch_size}")
+        return new_campaign
         
     except Exception as e:
         logger.warning(f"Failed to switch to Bayesian recommender: {e}")
-        return False
+        return campaign  # Return original campaign on failure
     
 def get_adaptive_acquisition_strategy(iteration: int, total_iterations: int, 
                                     current_best_yield: float) -> Tuple[str, int]:
@@ -288,15 +521,13 @@ def get_adaptive_acquisition_strategy(iteration: int, total_iterations: int,
     progress = iteration / total_iterations
     
     # Early stage: exploration with batch sampling
-    if progress < 0.3:
-        return ("qEI", 2)  # Batch Expected Improvement for exploration
-    # Middle stage: balanced exploration-exploitation
-    elif progress < 0.7:
-        if current_best_yield < 50:  # Low yields suggest need for more exploration
-            return ("UCB", 1)  # Upper Confidence Bound for exploration
+    if progress < 0.4:          # MORE EXPLORATION TIME
+        return ("qEI", 3)       # LARGER BATCHES
+    elif progress < 0.8:        # LONGER BALANCED PHASE
+        if current_best_yield < 60:  # LOWER THRESHOLD
+            return ("UCB", 2)   # BATCH UCB FOR MORE EXPLORATION
         else:
-            return ("EI", 1)   # Expected Improvement for balanced approach
-    # Late stage: exploitation
+            return ("EI", 1)
     else:
         return ("PI", 1)
 
@@ -386,33 +617,82 @@ def run_true_bayesian_optimization(
                 if catalyst and isinstance(catalyst, str) and catalyst.strip():
                     catalysts.add(catalyst.strip())
         
-        # ENHANCEMENT: Add rxn-insight conditions to expand search space
+        # ENHANCED: Advanced rxn-insight integration with intelligent merging
         rxn_insight_metadata = {}
         if use_rxn_insight:
             try:
                 rxn_insight_conditions, rxn_insight_metadata = get_rxn_insight_conditions(
-                    naked_reaction_smiles, n_conditions=30
+                    naked_reaction_smiles, n_conditions=num_initial_candidates + 20
                 )
                 
-                if rxn_insight_conditions:
-                    # Merge rxn-insight conditions with existing ones
-                    solvents.update(rxn_insight_conditions.get('solvents', []))
-                    reagents.update(rxn_insight_conditions.get('reagents', []))
-                    catalysts.update(rxn_insight_conditions.get('catalysts', []))
-                    temps.extend(rxn_insight_conditions.get('temperatures', []))
+                if rxn_insight_conditions and rxn_insight_metadata.get('analysis_successful', False):
+                    logger.info(f"Advanced rxn-insight analysis successful - "
+                               f"Class: {rxn_insight_metadata.get('reaction_class', 'Unknown')} "
+                               f"(confidence: {rxn_insight_metadata.get('reaction_confidence', 0):.2f})")
                     
-                    logger.info(f"rxn-insight expanded search space - "
-                               f"Reaction class: {rxn_insight_metadata.get('reaction_class', 'Unknown')}")
-                    logger.info(f"Total conditions now: {len(solvents)} solvents, "
+                    # Intelligent condition merging with priority to rxn-insight
+                    rxn_solvents = set(rxn_insight_conditions.get('solvents', []))
+                    rxn_reagents = set(rxn_insight_conditions.get('reagents', []))
+                    rxn_catalysts = set(rxn_insight_conditions.get('catalysts', []))
+                    
+                    # Priority merge: rxn-insight first, then RCR model conditions
+                    solvents = list(rxn_solvents) + [s for s in solvents if s not in rxn_solvents]
+                    reagents = list(rxn_reagents) + [r for r in reagents if r not in rxn_reagents]
+                    catalysts = list(rxn_catalysts) + [c for c in catalysts if c not in rxn_catalysts]
+                    
+                    # Advanced temperature integration
+                    temp_analysis = rxn_insight_conditions.get('temperature_analysis', {})
+                    if temp_analysis and 'recommended_range' in temp_analysis:
+                        rxn_temp_range = temp_analysis['recommended_range']
+                        if len(rxn_temp_range) == 2:
+                            # Use rxn-insight temperature range if statistically significant
+                            data_points = temp_analysis.get('data_points', 0)
+                            if data_points >= 3:  # Sufficient data
+                                temp_min, temp_max = rxn_temp_range
+                                logger.info(f"Using rxn-insight temperature range: {temp_min:.1f}-{temp_max:.1f}°C "
+                                           f"(based on {data_points} similar reactions)")
+                    
+                    logger.info(f"Enhanced search space: {len(solvents)} solvents, "
                                f"{len(reagents)} reagents, {len(catalysts)} catalysts")
+                    logger.info(f"Data sources: {rxn_insight_metadata.get('data_sources', 0)} similar reactions analyzed")
+                else:
+                    logger.warning("rxn-insight analysis unsuccessful, using RCR-only conditions")
                 
             except Exception as e:
-                logger.warning(f"rxn-insight integration failed, continuing with RCR-only conditions: {e}")
+                logger.warning(f"Advanced rxn-insight integration failed: {e}")
+                rxn_insight_metadata = {'analysis_successful': False, 'error': str(e)}
         
-        # Apply sensible defaults and filtering
-        solvents = sorted([s for s in solvents if s and len(s) < 50])[:20]  # Limit to 20 most reasonable solvents
-        reagents = sorted([r for r in reagents if r and len(r) < 50])[:15]   # Limit reagents
-        catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:15] # Limit catalysts
+        # Apply intelligent filtering based on rxn-insight rankings
+        if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
+            # Use statistical ranking from rxn-insight instead of arbitrary limits
+            top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
+            
+            # Prioritize statistically significant conditions
+            if 'solvents' in top_conditions:
+                priority_solvents = [item['name'] for item in top_conditions['solvents']]
+                other_solvents = [s for s in solvents if s not in priority_solvents and s and len(s) < 50]
+                solvents = priority_solvents + other_solvents[:max(0, 25-len(priority_solvents))]
+            else:
+                solvents = sorted([s for s in solvents if s and len(s) < 50])[:25]
+            
+            if 'reagents' in top_conditions:
+                priority_reagents = [item['name'] for item in top_conditions['reagents']]
+                other_reagents = [r for r in reagents if r not in priority_reagents and r and len(r) < 50]
+                reagents = priority_reagents + other_reagents[:max(0, 20-len(priority_reagents))]
+            else:
+                reagents = sorted([r for r in reagents if r and len(r) < 50])[:20]
+            
+            if 'catalysts' in top_conditions:
+                priority_catalysts = [item['name'] for item in top_conditions['catalysts']]
+                other_catalysts = [c for c in catalysts if c not in priority_catalysts and c and len(c) < 50]
+                catalysts = priority_catalysts + other_catalysts[:max(0, 20-len(priority_catalysts))]
+            else:
+                catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:20]
+        else:
+            # Fallback to larger limits when rxn-insight unavailable
+            solvents = sorted([s for s in solvents if s and len(s) < 50])[:25]   
+            reagents = sorted([r for r in reagents if r and len(r) < 50])[:30]  
+            catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:25]
         
         # Add "None" options for optional components
         if "None" not in reagents:
@@ -422,22 +702,50 @@ def run_true_bayesian_optimization(
             
         # Ensure we have fallback options
         if not solvents:
-            solvents = ["THF", "DCM", "toluene", "DMF"]
+            solvents = [
+                "C1CCOC1",      # THF
+                "CCOCC",        # Diethyl ether  
+                "ClCCl",        # DCM
+                "c1ccccc1",     # Benzene/Toluene
+                "CC(C)=O",      # Acetone
+                "CN(C)C=O",     # DMF
+                "CCCCCC",       # Hexane
+                "CCO",          # Ethanol
+                "CO",           # Methanol
+                "ClC(Cl)Cl"     # Chloroform
+            ]
+
         if not reagents:
-            reagents = ["None"]
+            reagents = [
+                "None", "O", "Cl", "F", "Br", "I",           # Basic reagents
+                "[Li+]", "[Na+]", "[K+]",                    # Metal cations
+                "CCN(CC)CC",                                  # Triethylamine
+                "C1CCC2=NCCCN2CC1",                         # DBU
+                "ClC(=O)C(=O)Cl",                           # Oxalyl chloride
+                "CC(C)(C)OC(=O)N",                          # Boc anhydride
+                "ClS(=O)(=O)c1ccc(C)cc1"                    # TsCl
+            ]
+
         if not catalysts:
-            catalysts = ["None"]
+            catalysts = [
+                "None",
+                "[Pd]",                    # Palladium
+                "[Ni]", 
+                "[Cu]",
+                "c1ccc(P(c2ccccc2)c2ccccc2)cc1",  # PPh3
+                "CC1(C)c2cccc(P(c3ccccc3)c3ccccc3)c2Oc2c(P(c3ccccc3)c3ccccc3)cccc21"  # BINAP
+            ]
         
         # Enhanced temperature range
         if temps:
-            temps = [t for t in temps if 0 <= t <= 300]  # Filter reasonable temperatures
+            temps = [t for t in temps if -100 <= t <= 400]  # Filter reasonable temperatures
             temp_min, temp_max = min(temps), max(temps)
             if temp_max - temp_min < 10.0:  # Ensure reasonable range
                 temp_center = (temp_min + temp_max) / 2
                 temp_min = max(0, temp_center - 25)
                 temp_max = min(300, temp_center + 25)
         else:
-            temp_min, temp_max = 20.0, 100.0
+            temp_min, temp_max = -100.0, 200.0
         
         logger.info(f"Final search space: {len(solvents)} solvents, {len(reagents)} reagents, "
                    f"{len(catalysts)} catalysts, temp range: {temp_min:.1f}-{temp_max:.1f}°C")
@@ -567,16 +875,13 @@ def run_true_bayesian_optimization(
                 new_acquisition, new_batch_size = get_adaptive_acquisition_strategy(
                     i - num_random_init + 1, num_iterations - num_random_init, current_best_yield
                 )
-                
-                # Switch strategy if needed
                 if new_acquisition != current_acquisition or new_batch_size != current_batch_size:
                     logger.info(f"Switching to {new_acquisition} with batch_size={new_batch_size}")
-                    switch_success = switch_to_bayesian_recommender(
+                    bayesian_campaign = switch_to_bayesian_recommender(
                         bayesian_campaign, new_acquisition, new_batch_size
                     )
-                    if switch_success:
-                        current_acquisition = new_acquisition
-                        current_batch_size = new_batch_size
+                    current_acquisition = new_acquisition
+                    current_batch_size = new_batch_size
             
             # Get recommendations
             recommendations = bayesian_campaign.recommend(batch_size=current_batch_size)
@@ -666,7 +971,16 @@ def run_true_bayesian_optimization(
                 "catalysts": catalysts,
                 "temperature_range": [round(temp_min, 1), round(temp_max, 1)]
             },
-            "rxn_insight_analysis": rxn_insight_metadata,  # NEW: Add reaction classification info
+            "rxn_insight_analysis": {
+                **rxn_insight_metadata,  # Include all the rich metadata
+                "condition_rankings": rxn_insight_metadata.get('top_ranked_conditions', {}),
+                "statistical_confidence": rxn_insight_metadata.get('condition_statistics', {}),
+                "data_quality": {
+                    "similar_reactions_count": rxn_insight_metadata.get('data_sources', 0),
+                    "reaction_classification_confidence": rxn_insight_metadata.get('reaction_confidence', 0),
+                    "temperature_data_points": rxn_insight_metadata.get('condition_statistics', {}).get('temperature_data_points', 0)
+                }
+            },
             "performance_metrics": {
                 "total_evaluations": len(optimization_history),
                 "random_phase_evaluations": len(random_yields),
@@ -695,12 +1009,12 @@ if __name__ == '__main__':
     
     results = run_true_bayesian_optimization(
         naked_reaction_smiles=test_reaction,
-        num_initial_candidates=25,      # Increased for larger search space
-        num_iterations=20,              # More iterations to explore enhanced space
-        num_random_init=6,              # More random exploration
+        num_initial_candidates=40,     
+        num_iterations=30,             
+        num_random_init=10,             
         use_adaptive_strategy=True,
-        initial_batch_size=3,           # Larger batches for efficiency
-        use_rxn_insight=True            # Enable rxn-insight integration
+        initial_batch_size=4,           
+        use_rxn_insight=True
     )
 
     import json

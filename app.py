@@ -272,8 +272,8 @@ def api_optimize_reaction():
     """
     data = request.json
     naked_reaction_smiles = data.get('naked_reaction_smiles')
-    num_iterations = int(data.get('num_iterations', 15))
-    num_random_init = int(data.get('num_random_init', 5))
+    num_iterations = int(data.get('num_iterations', 30))
+    num_random_init = int(data.get('num_random_init', 10))
 
     if not naked_reaction_smiles:
         return jsonify({"error": "Naked reaction SMILES is required for optimization."}), 400
@@ -285,6 +285,15 @@ def api_optimize_reaction():
             naked_reaction_smiles=naked_reaction_smiles,
             num_iterations=num_iterations,
             num_random_init=num_random_init
+        )
+        results = run_true_bayesian_optimization(
+            naked_reaction_smiles=naked_reaction_smiles,
+            num_initial_candidates=40,     
+            num_iterations=num_iterations,             
+            num_random_init=num_random_init,             
+            use_adaptive_strategy=True,
+            initial_batch_size=4,           
+            use_rxn_insight=True
         )
         if "error" in results:
             # Pass through errors from the optimization script
