@@ -610,7 +610,8 @@ def plan_synthesis_route(target_identifier: str) -> dict:
                         "coeff": product_coeffs.get(smi, 1)
                     } for smi in byproducts],
                     "reaction_image_url": image_url,
-                    "optimized_reaction_smiles": yield_result.get('optimized_reaction_smiles', reaction_smiles_str) if yield_result else reaction_smiles_str
+                    "optimized_reaction_smiles": yield_result.get('optimized_reaction_smiles', reaction_smiles_str) if yield_result else reaction_smiles_str,
+                    "naked_reaction_smiles": reaction_smiles_str
                 })
             
             # Calculate overall yield from individual step yields

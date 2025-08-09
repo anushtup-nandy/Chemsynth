@@ -10,6 +10,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.23.0/cytoscape.min.js"></script>
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -227,6 +229,56 @@
                 <button id="submit-new-route-btn" class="gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg hover:shadow-lg">
                     <i class="fas fa-cogs mr-2"></i> Generate Route
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bayesian Optimization Modal -->
+    <div id="optimization-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <!-- Header -->
+            <div class="flex justify-between items-center p-4 border-b border-gray-700">
+                <h3 class="text-xl font-bold text-white">Reaction Condition Optimization</h3>
+                <button id="close-optimization-modal-btn" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times fa-lg"></i>
+                </button>
+            </div>
+
+            <!-- Content -->
+            <div id="optimization-modal-content" class="p-6 overflow-y-auto">
+                <!-- Loading State -->
+                <div id="optimization-loading-state" class="text-center py-16">
+                    <i class="fas fa-atom fa-spin text-blue-400 text-4xl"></i>
+                    <p class="mt-4 text-lg text-gray-300">Running Bayesian Optimization...</p>
+                    <p class="text-sm text-gray-500">This may take a minute. The system is exploring the reaction space to find the highest yield.</p>
+                </div>
+
+                <!-- Results State -->
+                <div id="optimization-results-state" class="hidden">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Chart -->
+                        <div>
+                            <h4 class="font-semibold mb-2 text-gray-200">Optimization Progress (Yield vs. Iteration)</h4>
+                            <div class="bg-gray-900 p-2 rounded-lg">
+                                <canvas id="optimization-chart"></canvas>
+                            </div>
+                        </div>
+                        <!-- Summary -->
+                        <div>
+                            <h4 class="font-semibold mb-2 text-gray-200">Optimization Summary</h4>
+                            <div id="optimization-summary-content" class="bg-gray-700 p-4 rounded-lg space-y-3">
+                                <!-- Content will be injected by JS -->
+                            </div>
+                        </div>
+                    </div>
+                    <!-- History Table -->
+                    <div class="mt-6">
+                        <h4 class="font-semibold mb-2 text-gray-200">Full Optimization History</h4>
+                        <div id="optimization-history-table" class="max-h-64 overflow-y-auto bg-gray-900 rounded-lg">
+                            <!-- Table will be injected by JS -->
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

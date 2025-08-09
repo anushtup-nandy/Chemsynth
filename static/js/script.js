@@ -4,6 +4,7 @@ let literatureResults = [];
 let sourcingData = {};
 let currentTargetSMILES = '';
 let cy; // Cytoscape instance
+let optimizationChartInstance = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -38,6 +39,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const openProjectBtn = document.getElementById('open-project-btn');
     const projectFileInput = document.getElementById('project-file-input');
 
+    // --- Bayesian optimiation ---
+    const optimizationModal = document.getElementById('optimization-modal');
+    const closeOptimizationModalBtn = document.getElementById('close-optimization-modal-btn');
+
     // --- Initial State Setup ---
     updateProgress(0);
     setupTabControls();
@@ -53,6 +58,9 @@ document.addEventListener('DOMContentLoaded', function() {
     saveProjectBtn.addEventListener('click', handleSaveProject);
     openProjectBtn.addEventListener('click', handleOpenProject);
     projectFileInput.addEventListener('change', loadProjectFromFile);
+
+    // --- Bayesian optimization --- 
+    closeOptimizationModalBtn.addEventListener('click', () => optimizationModal.classList.add('hidden'));
 
     // --- Dynamic event listeners for expanding reactants/visualizations ---
     routeContentContainer.addEventListener('click', function(e) {
@@ -72,6 +80,17 @@ document.addEventListener('DOMContentLoaded', function() {
             const smiles = expandableBox.dataset.smiles;
             const targetContainerId = expandableBox.dataset.targetId;
             handleExpandVisualization(smiles, targetContainerId, expandableBox);
+        }
+    });
+
+    routeContentContainer.addEventListener('click', function(e) {
+        if (e.target.matches('.optimize-step-btn') || e.target.closest('.optimize-step-btn')) {
+            e.preventDefault();
+            const button = e.target.closest('.optimize-step-btn');
+            const nakedSmiles = button.dataset.smiles;
+            if (nakedSmiles) {
+                handleOptimizeStep(nakedSmiles);
+            }
         }
     });
 
@@ -801,6 +820,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div id="${subRouteContainerId}" class="pl-4 border-l-2 border-gray-600 ml-2"></div>`;
             }).join('');
 
+            // Add the "Optimize" button. It uses the `naked_reaction_smiles` passed from the backend.
+            const optimizeButtonHtml = `
+                <button class="optimize-step-btn gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg hover:shadow-lg w-full mt-4 text-sm"
+                        data-smiles="${step.naked_reaction_smiles}">
+                    <i class="fas fa-cogs mr-2"></i> Optimize Conditions
+                </button>`;
+
             detailsHtml += `
                 <div class="bg-gray-700 rounded-lg p-4 flex flex-col">
                     <h4 class="font-bold mb-2">Step ${step.step_number}: ${step.title}</h4>
@@ -816,6 +842,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>
                         <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
                     </div>
+                    ${optimizeButtonHtml}
                 </div>`;
         });
         detailsHtml += '</div>';
@@ -1252,5 +1279,185 @@ document.addEventListener('DOMContentLoaded', function() {
     function formatCurrency(value) {
         if (typeof value !== 'number') return '$0.00';
         return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+    }
+
+    /**
+     * Handles the click on an "Optimize" button for a reaction step.
+     * @param {string} nakedSmiles The naked reaction SMILES to optimize.
+     */
+    async function handleOptimizeStep(nakedSmiles) {
+        console.log("Optimizing reaction:", nakedSmiles);
+        const modal = document.getElementById('optimization-modal');
+        const loadingState = document.getElementById('optimization-loading-state');
+        const resultsState = document.getElementById('optimization-results-state');
+
+        // Reset and show modal in loading state
+        modal.classList.remove('hidden');
+        loadingState.classList.remove('hidden');
+        resultsState.classList.add('hidden');
+        if (optimizationChartInstance) {
+            optimizationChartInstance.destroy();
+        }
+
+        try {
+            const response = await fetch('/api/optimize_reaction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ naked_reaction_smiles: nakedSmiles }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Optimization failed.");
+            }
+
+            // Render results and switch view
+            renderOptimizationResults(data);
+            loadingState.classList.add('hidden');
+            resultsState.classList.remove('hidden');
+
+        } catch (error) {
+            console.error('Bayesian optimization failed:', error);
+            loadingState.innerHTML = `<div class="text-center py-16 text-red-400">
+                                         <i class="fas fa-times-circle text-4xl"></i>
+                                         <p class="mt-4 text-lg">Optimization Failed</p>
+                                         <p class="text-sm text-gray-500">${error.message}</p>
+                                      </div>`;
+        }
+    }
+
+    /**
+     * Renders the results from the Bayesian Optimization into the modal.
+     * @param {object} data The response data from the /api/optimize_reaction endpoint.
+     */
+    function renderOptimizationResults(data) {
+        // 1. Render Summary
+        const summaryContainer = document.getElementById('optimization-summary-content');
+        const best = data.best_conditions;
+        summaryContainer.innerHTML = `
+            <div class="flex justify-between items-baseline">
+                <span class="text-sm text-gray-400">Max Yield Found</span>
+                <span class="text-2xl font-bold text-green-400">${data.max_yield.toFixed(2)}%</span>
+            </div>
+            <div class="pt-3 border-t border-gray-600">
+                <p class="text-sm font-medium text-gray-300">Best Conditions:</p>
+                <ul class="text-xs list-disc list-inside pl-2 mt-1 space-y-1 text-gray-400">
+                    <li><span class="font-semibold">Temperature:</span> ${best.Temperature}°C</li>
+                    <li><span class="font-semibold">Solvent:</span> ${best.Solvent}</li>
+                    <li><span class="font-semibold">Reagent:</span> ${best.Reagent}</li>
+                    <li><span class="font-semibold">Catalyst:</span> ${best.Catalyst}</li>
+                </ul>
+            </div>
+        `;
+
+        // 2. Render History Table
+        const tableContainer = document.getElementById('optimization-history-table');
+        let tableHtml = `<table class="w-full text-left text-xs">
+                            <thead class="bg-gray-800 text-gray-400 uppercase">
+                                <tr>
+                                    <th class="p-2">#</th>
+                                    <th class="p-2">Phase</th>
+                                    <th class="p-2">Temp (°C)</th>
+                                    <th class="p-2">Solvent</th>
+                                    <th class="p-2">Reagent</th>
+                                    <th class="p-2">Catalyst</th>
+                                    <th class="p-2 text-right">Yield (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-gray-300">`;
+        data.optimization_history.forEach(h => {
+            const phaseClass = h.phase === 'random_exploration' ? 'text-yellow-400' : 'text-blue-400';
+            tableHtml += `
+                <tr class="border-t border-gray-700">
+                    <td class="p-2">${h.iteration}</td>
+                    <td class="p-2 ${phaseClass}">${h.phase.replace('_', ' ')}</td>
+                    <td class="p-2">${h.conditions.Temperature}</td>
+                    <td class="p-2">${h.conditions.Solvent}</td>
+                    <td class="p-2">${h.conditions.Reagent}</td>
+                    <td class="p-2">${h.conditions.Catalyst}</td>
+                    <td class="p-2 text-right font-semibold">${h.yield.toFixed(2)}</td>
+                </tr>`;
+        });
+        tableHtml += `</tbody></table>`;
+        tableContainer.innerHTML = tableHtml;
+
+        // 3. Render Chart
+        const ctx = document.getElementById('optimization-chart').getContext('2d');
+        const history = data.optimization_history;
+        const labels = history.map(h => h.iteration);
+        const yields = history.map(h => h.yield);
+
+        // Find the running maximum yield
+        let maxYieldSoFar = 0;
+        const runningMax = yields.map(y => {
+            maxYieldSoFar = Math.max(maxYieldSoFar, y);
+            return maxYieldSoFar;
+        });
+        
+        const randomPhaseEnd = data.performance_metrics.random_phase_evaluations;
+
+        if (optimizationChartInstance) {
+            optimizationChartInstance.destroy();
+        }
+
+        optimizationChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Yield per Iteration',
+                    data: yields,
+                    borderColor: 'rgba(96, 165, 250, 0.7)', // blue-400
+                    backgroundColor: 'rgba(96, 165, 250, 0.1)',
+                    borderWidth: 1,
+                    pointRadius: 3,
+                    tension: 0.1
+                }, {
+                    label: 'Best Yield Found',
+                    data: runningMax,
+                    borderColor: 'rgba(52, 211, 153, 1)', // green-400
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    fill: false
+                }]
+            },
+            options: {
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        max: 100,
+                        ticks: { color: '#9CA3AF' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    x: {
+                        ticks: { color: '#9CA3AF' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: '#D1D5DB' } },
+                    annotation: {
+                        annotations: {
+                            line1: {
+                                type: 'line',
+                                xMin: randomPhaseEnd,
+                                xMax: randomPhaseEnd,
+                                borderColor: 'rgba(251, 191, 36, 0.5)', // yellow-400
+                                borderWidth: 2,
+                                borderDash: [6, 6],
+                                label: {
+                                    content: 'Bayesian Phase Starts',
+                                    enabled: true,
+                                    position: 'start',
+                                    color: '#FBBF24',
+                                    font: { size: 10 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 });

@@ -10,6 +10,7 @@ from core_logic.synthesis_planner import plan_synthesis_route, resolve_molecule_
 from core_logic.sourcing_analysis import analyze_route_cost_and_sourcing
 from core_logic.chemfm_synthesis_engine import generate_route_with_chemfm
 from utils.pubchem_processor import search_pubchem_literature
+from utils.bayopt_react import run_true_bayesian_optimization
 try:
     import pubchempy as pcp
     PUBCHEM_AVAILABLE = True
@@ -262,6 +263,39 @@ def api_analyze_sourcing():
         print(traceback.format_exc())
         return jsonify({"error": "An internal server error occurred during analysis."}), 500
 
+# Bayesian optimization end point
+@app.route('/api/optimize_reaction', methods=['POST'])
+def api_optimize_reaction():
+    """
+    API endpoint to perform detailed Bayesian Optimization for a single reaction step.
+    Accepts a naked reaction SMILES string.
+    """
+    data = request.json
+    naked_reaction_smiles = data.get('naked_reaction_smiles')
+    num_iterations = int(data.get('num_iterations', 15))
+    num_random_init = int(data.get('num_random_init', 5))
+
+    if not naked_reaction_smiles:
+        return jsonify({"error": "Naked reaction SMILES is required for optimization."}), 400
+
+    try:
+        print(f"Starting Bayesian Optimization for: '{naked_reaction_smiles}'")
+        # Call the main function from bayopt_react.py
+        results = run_true_bayesian_optimization(
+            naked_reaction_smiles=naked_reaction_smiles,
+            num_iterations=num_iterations,
+            num_random_init=num_random_init
+        )
+        if "error" in results:
+            # Pass through errors from the optimization script
+            return jsonify(results), 400
+        
+        return jsonify(results)
+
+    except Exception as e:
+        print(f"An unhandled error occurred during Bayesian Optimization: {e}")
+        print(traceback.format_exc())
+        return jsonify({"error": "An internal server error occurred during optimization."}), 500
 
 @app.route('/api/generate_new_route', methods=['POST'])
 def api_generate_new_route():
@@ -356,6 +390,7 @@ if __name__ == '__main__':
     print("  POST /api/plan_synthesis - Synthesis route planning")
     print("  POST /api/analyze_sourcing - Cost and sourcing analysis")
     print("  POST /api/generate_new_route - Alternative route generation")
+    print("  POST /api/optimize_reaction - On-demand Bayesian Optimization for a reaction step")
     print("  GET  /api/health - System health check")
     print("=========================")
     
