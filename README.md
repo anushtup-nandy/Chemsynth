@@ -50,6 +50,7 @@ By blending deterministic algorithms (e.g., graph-based tree search) with probab
 
 - **Advanced Reaction Optimization & Analysis:**
   - **AI-Powered Yield Prediction:** Integrates a two-stage deep learning pipeline. First, it predicts optimal reaction conditions (catalysts, reagents, solvents, temperature). Then, it feeds the fully-specified reaction into a Transformer-based model to predict the final yield with high accuracy.
+  - **Interactive Bayesian Optimization:** Empowers the user to perform on-demand, robust Bayesian Optimization for any synthesis step. This feature uses the **BayBE** library to intelligently explore the reaction condition space (temperature, solvents, reagents) to discover conditions that maximize yield, providing a data-driven path to process improvement.
   - **Stoichiometric Balancing:** Automatically balances complex chemical equations using an Integer Linear Programming (ILP) solver, ensuring atom conservation and providing correct stoichiometric coefficients for all reactants, products, and byproducts.
 
 - **Sourcing and Cost Analysis:**
@@ -78,6 +79,7 @@ graph TD
         D[ChemFM Engine<br/>chemfm_synthesis_engine.py]
         E[Literature Analyzer<br/>literature_analysis.py]
         F[Sourcing Analyzer<br/>sourcing_analysis.py]
+        BO[Bayesian Optimizer<br/>bayopt_react.py]
     end
     subgraph Utility ML Modules
         G[Yield Optimizer<br/>yield_optimizer.py]
@@ -95,6 +97,7 @@ graph TD
     B -- Generate New Route --> D
     B -- Literature Search --> E
     B -- Analyze Sourcing --> F
+    B -- Optimize Reaction (On-Demand) --> BO
     C -- Uses --> G
     C -- Uses --> H
     C -- Uses --> I
@@ -102,6 +105,7 @@ graph TD
     D -- Uses --> I
     E -- Uses --> J
     E -- Uses --> I
+    BO -- Uses --> G
     G -- Loads --> K
     C -- Uses AiZynthFinder --> K
     D -- Loads from --> L
@@ -115,10 +119,11 @@ graph TD
 1.  **Flask App (`app.py`):** The main entry point. It exposes all REST API endpoints, handles request validation, and orchestrates calls to the various core logic modules.
 2.  **Synthesis Planner (`synthesis_planner.py`):** The primary module for retrosynthesis. It initializes `AiZynthFinder`, runs the tree search, processes the resulting routes, and integrates yield prediction, balancing, and LLM elaboration for each step.
 3.  **ChemFM Engine (`chemfm_synthesis_engine.py`):** A specialized module that queries the `ChemFM` model to generate a single-step retrosynthesis. It pipelines this result into the yield optimizer and LLM formatter.
-4.  **Literature Analyzer (`literature_analysis.py`):** Orchestrates parallel searches across multiple scientific databases. It includes logic for deduplicating, scoring, and ranking results for relevance.
-5.  **Sourcing Analyzer (`sourcing_analysis.py`):** Contains the logic for calculating reagent mass requirements and querying supplier information. It includes a cache and fallback mechanisms for robustness.
-6.  **Yield Optimizer (`yield_optimizer.py`):** A critical ML module that wraps two separate neural networks: one for predicting conditions and another for predicting yield.
-7.  **Utilities (`utils/`):** A collection of helper modules for common tasks like interfacing with the LLM API (`llm_interface.py`), loading prompts (`prompt_loader.py`), and communicating with specific databases (`arxiv_processor.py`, `pubchem_processor.py`, etc.).
+4.  **Bayesian Optimizer (`bayopt_react.py`):** An on-demand core logic module that performs robust, multi-iteration optimization of reaction conditions using the `baybe` library. It is triggered by the user from the frontend for any given reaction step.
+5.  **Literature Analyzer (`literature_analysis.py`):** Orchestrates parallel searches across multiple scientific databases. It includes logic for deduplicating, scoring, and ranking results for relevance.
+6.  **Sourcing Analyzer (`sourcing_analysis.py`):** Contains the logic for calculating reagent mass requirements and querying supplier information. It includes a cache and fallback mechanisms for robustness.
+7.  **Yield Optimizer (`yield_optimizer.py`):** A critical ML utility module that wraps two separate neural networks: one for predicting conditions and another for predicting yield. It serves both initial fast predictions and is used repeatedly by the Bayesian Optimizer.
+8.  **Utilities (`utils/`):** A collection of helper modules for common tasks like interfacing with the LLM API (`llm_interface.py`), loading prompts (`prompt_loader.py`), and communicating with specific databases (`arxiv_processor.py`, `pubchem_processor.py`, etc.).
 
 ## Models and Datasets
 
@@ -130,6 +135,7 @@ The platform's capabilities are powered by a suite of state-of-the-art models an
 | **Retrosynthesis**        | `ChemFM-3B`                                                                                                     | Hugging Face Hub (`ChemFM/ChemFM-3B`)                                              | Generative, single-step synthesis suggestion.         |
 | **Condition Prediction**  | Custom `NeuralNetContextRecommender` (RCR)                                                                      | Local (`models/model 2/`)                                                          | Predicts catalyst, solvent, reagent, temperature.     |
 | **Yield Prediction**      | Custom Transformer `SmilesClassificationModel`                                                                  | Local (`models/model/`)                                                            | Predicts reaction yield percentage.                     |
+| **Yield Optimization**    | `baybe` library with Gaussian Process surrogate                                                                 | `baybe` Python package                                                             | On-demand, iterative optimization of reaction yield.    |
 | **Purchasable Reagents**  | ZINC In-Stock Database (`zinc_stock.hdf5`)                                                                      | ZINC Database                                                                      | Defines commercially available starting materials.      |
 | **Literature**            | PubChem, PubMed, arXiv, Europe PMC                                                                              | Public APIs                                                                        | Sourcing academic papers, patents, and articles.      |
 | **General Knowledge**     | Google Gemini family of models                                                                                  | Google AI Platform API                                                             | Text generation, summarization, and formatting.         |
@@ -139,6 +145,7 @@ The platform's capabilities are powered by a suite of state-of-the-art models an
 
 - **Backend Framework:** Flask
 - **Machine Learning:** PyTorch, Hugging Face Transformers, JAX (via ChemFM dependencies)
+- **Bayesian Optimization:** BayBE
 - **Cheminformatics:** RDKit, AiZynthFinder, PubChemPy
 - **Numerical Computing:** NumPy, Pandas, SciPy
 - **Scientific Libraries:** `chemicals`, `pulp` (for ILP)

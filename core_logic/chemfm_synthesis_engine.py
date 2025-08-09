@@ -10,6 +10,7 @@ from utils.prompt_loader import format_prompt
 from utils.reaction_utils import generate_reaction_image
 from utils.yield_optimizer import AdvancedYieldPredictor
 from transformers.models.llama.modeling_llama import LlamaAttention
+from utils.bayopt_react import run_true_bayesian_optimization, merge_reaction_with_conditions
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -200,6 +201,7 @@ def generate_route_with_chemfm(target_smiles: str, user_suggestion: str) -> dict
         # 7. Post-process the LLM output (add image URL, and fallback yield/conditions)
         if "steps" in new_route_data and new_route_data["steps"]:
             step = new_route_data["steps"][0]
+            step["naked_reaction_smiles"] = naked_reaction_smiles # Add the key for the frontend button 
             reaction_smiles_for_image = None
 
             # If we have optimized data, use it as the source of truth
