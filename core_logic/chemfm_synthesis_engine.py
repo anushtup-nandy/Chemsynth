@@ -34,7 +34,11 @@ def _get_chemfm_model():
         try:
             model_name = "ChemFM/ChemFM-3B"
             _chemfm_tokenizer = AutoTokenizer.from_pretrained(model_name)
-            _chemfm_model = AutoModelForCausalLM.from_pretrained(model_name).to(_device)
+            _chemfm_model = AutoModelForCausalLM.from_pretrained(model_name)
+            if _device == "mps":
+                _chemfm_model = _chemfm_model.to(torch.float32)
+            
+            _chemfm_model = _chemfm_model.to(_device)
             # _chemfm_model = AutoModel.from_pretrained(model_name, ignore_mismatched_sizes=True).to(_device)
             # tokenizer = AutoTokenizer.from_pretrained(model_name)
             _chemfm_model.eval() # Set model to evaluation mode
