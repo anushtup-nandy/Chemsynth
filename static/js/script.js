@@ -614,12 +614,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const routeName = route.name || defaultName;
             const isActive = route.id === activeRouteId ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300';
 
-            const rawYield = route.overall_yield || 0;
+            const rawYield = route.overall_yield || 0; 
             // The yield is already a percentage from the backend
-            const displayYield = rawYield;
+            const displayYield = rawYield; 
+            const displayScore = (rawYield / 100).toFixed(2);
 
             tabsHtml += `<a href="#" class="${isActive} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm route-tab" data-route-id="${route.id}">
-                            ${routeName} (${displayYield.toFixed(1)}% yield)
+                            ${routeName} (Score: ${displayScore})
                         </a>`;
         });
         tabsHtml += '</nav>';
@@ -701,7 +702,8 @@ document.addEventListener('DOMContentLoaded', function() {
                          data-smiles="${product.smiles}" 
                          data-target-id="${containerId}">
                         <div class="text-center p-4">
-                            <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
+                            <!--<div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>-->
+                            <div class="text-xs text-gray-400 mb-1">Confidence: ${((step.yield || 0) / 100).toFixed(2)}</div>
                             <div class="font-bold ${textColor}">${titleText}</div>
                             <div class="text-xs text-gray-400 mt-1">${product.formula}</div>
                         </div>
@@ -759,7 +761,8 @@ document.addEventListener('DOMContentLoaded', function() {
                      data-smiles="${product.smiles}"
                      data-target-id="${containerId}">
                     <div class="text-center p-2">
-                        <div class="text-xs text-gray-400">Yield: ${(step.yield || 0).toFixed(0)}%</div>
+                        <!--<div class="text-xs text-gray-400">Yield: ${(step.yield || 0).toFixed(0)}%</div>-->
+                        <div class="text-xs text-gray-400">Conf: ${((step.yield || 0) / 100).toFixed(2)}</div>
                         <div class="font-bold text-xs">${product.formula}</div>
                     </div>
                 </div>
@@ -818,7 +821,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         <ul class="text-sm text-gray-300 mb-3 space-y-1">
                            ${reactantsHtml}
                         </ul>
-                        <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>
+                        <!--<div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>-->
+                        <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Confidence Score:</span> ${((step.yield || 0) / 100).toFixed(2)}</div>
                         <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
                     </div>
                     ${optimizeButtonHtml}
@@ -844,7 +848,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p class="text-xs">
                         <span class="text-gray-400">Sub-Step ${step.step_number}:</span>
                         ${reactantsList} → ${step.product.formula}
-                        <span class="text-gray-500">(${(step.yield || 0).toFixed(1)}%)</span>
+                        <!--<span class="text-gray-500">(${(step.yield || 0).toFixed(1)}%)</span>-->
+                        <span class="text-gray-500">(conf: ${((step.yield || 0) / 100).toFixed(2)})</span>
                     </p>
                 </div>
             `;
@@ -1264,9 +1269,39 @@ document.addEventListener('DOMContentLoaded', function() {
      * Handles the click on an "Optimize" button for a reaction step.
      * @param {string} nakedSmiles The naked reaction SMILES to optimize.
      */
+    // function handleOptimizeStep(nakedSmiles) {
+    //     console.log("Setting up optimization for:", nakedSmiles);
+    //     currentOptimizationSmiles = nakedSmiles;
+
+    //     optimizationModal.classList.remove('hidden');
+    //     setupState.classList.remove('hidden');
+    //     loadingState.classList.add('hidden');
+    //     resultsState.classList.add('hidden');
+        
+    //     // Reset the UI
+    //     dataPointsContainer.innerHTML = '';
+    //     document.getElementById('prior-solvents').value = '';
+    //     document.getElementById('prior-reagents').value = '';
+    //     document.getElementById('prior-catalysts').value = '';
+    //     document.getElementById('prior-temp-min').value = '';
+    //     document.getElementById('prior-temp-max').value = '';
+    //     if (optimizationChartInstance) {
+    //         optimizationChartInstance.destroy();
+    //     }
+    // }
     function handleOptimizeStep(nakedSmiles) {
         console.log("Setting up optimization for:", nakedSmiles);
         currentOptimizationSmiles = nakedSmiles;
+
+        // --- MODIFICATION: Make the modal wider to accommodate the new layout ---
+        // This assumes the modal's direct child is the dialog panel that controls width.
+        const modalDialog = optimizationModal.querySelector('div'); 
+        if (modalDialog) {
+            // Replace existing width classes with a larger one. Your TailwindCSS build
+            // must be configured to include 'max-w-6xl' for this to work.
+            modalDialog.classList.remove('max-w-2xl', 'max-w-3xl', 'max-w-4xl', 'max-w-5xl');
+            modalDialog.classList.add('max-w-6xl');
+        }
 
         optimizationModal.classList.remove('hidden');
         setupState.classList.remove('hidden');
@@ -1397,18 +1432,192 @@ document.addEventListener('DOMContentLoaded', function() {
      * Renders the results from the Bayesian Optimization into the modal.
      * @param {object} data The response data from the /api/optimize_reaction endpoint.
      */
+    // function renderOptimizationResults(data) {
+    //     // 1. Render Summary
+    //     const summaryContainer = document.getElementById('optimization-summary-content');
+    //     const best = data.best_conditions;
+    //     summaryContainer.innerHTML = `
+    //         <div class="flex justify-between items-baseline">
+    //             <span class="text-sm text-gray-400">Max Yield Found</span>
+    //             <span class="text-2xl font-bold text-green-400">${data.max_yield.toFixed(2)}%</span>
+    //         </div>
+    //         <div class="pt-3 border-t border-gray-600">
+    //             <p class="text-sm font-medium text-gray-300">Best Conditions:</p>
+    //             <ul class="text-xs list-disc list-inside pl-2 mt-1 space-y-1 text-gray-400">
+    //                 <li><span class="font-semibold">Temperature:</span> ${best.Temperature}°C</li>
+    //                 <li><span class="font-semibold">Solvent:</span> ${best.Solvent}</li>
+    //                 <li><span class="font-semibold">Reagent:</span> ${best.Reagent}</li>
+    //                 <li><span class="font-semibold">Catalyst:</span> ${best.Catalyst}</li>
+    //             </ul>
+    //         </div>
+    //     `;
+        
+    //     // 2. Render History Table
+    //     const tableContainer = document.getElementById('optimization-history-table');
+    //     let tableHtml = `<table class="w-full text-left text-xs">
+    //                         <thead class="bg-gray-800 text-gray-400 uppercase">
+    //                             <tr>
+    //                                 <th class="p-2">#</th>
+    //                                 <th class="p-2">Phase</th>
+    //                                 <th class="p-2">Temp (°C)</th>
+    //                                 <th class="p-2">Solvent</th>
+    //                                 <th class="p-2">Reagent</th>
+    //                                 <th class="p-2">Catalyst</th>
+    //                                 <th class="p-2 text-right">Yield (%)</th>
+    //                             </tr>
+    //                         </thead>
+    //                         <tbody class="text-gray-300">`;
+    //     data.optimization_history.forEach(h => {
+    //         const phaseClass = h.phase === 'random_exploration' ? 'text-yellow-400' : 'text-blue-400';
+    //         tableHtml += `
+    //             <tr class="border-t border-gray-700">
+    //                 <td class="p-2">${h.iteration}</td>
+    //                 <td class="p-2 ${phaseClass}">${h.phase.replace('_', ' ')}</td>
+    //                 <td class="p-2">${h.conditions.Temperature}</td>
+    //                 <td class="p-2">${h.conditions.Solvent}</td>
+    //                 <td class="p-2">${h.conditions.Reagent}</td>
+    //                 <td class="p-2">${h.conditions.Catalyst}</td>
+    //                 <td class="p-2 text-right font-semibold">${h.yield.toFixed(2)}</td>
+    //             </tr>`;
+    //     });
+    //     tableHtml += `</tbody></table>`;
+    //     tableContainer.innerHTML = tableHtml;
+
+    //     // 3. Render Chart
+    //     const ctx = document.getElementById('optimization-chart').getContext('2d');
+    //     const history = data.optimization_history;
+    //     const labels = history.map(h => h.iteration);
+    //     const yields = history.map(h => h.yield);
+
+    //     // Find the running maximum yield
+    //     let maxYieldSoFar = 0;
+    //     const runningMax = yields.map(y => {
+    //         maxYieldSoFar = Math.max(maxYieldSoFar, y);
+    //         return maxYieldSoFar;
+    //     });
+        
+    //     const randomPhaseEnd = data.performance_metrics.random_phase_evaluations;
+
+    //     if (optimizationChartInstance) {
+    //         optimizationChartInstance.destroy();
+    //     }
+
+    //     optimizationChartInstance = new Chart(ctx, {
+    //         type: 'line',
+    //         data: {
+    //             labels: labels,
+    //             datasets: [{
+    //                 label: 'Yield per Iteration',
+    //                 data: yields,
+    //                 borderColor: 'rgba(96, 165, 250, 0.7)', // blue-400
+    //                 backgroundColor: 'rgba(96, 165, 250, 0.1)',
+    //                 borderWidth: 1,
+    //                 pointRadius: 3,
+    //                 tension: 0.1
+    //             }, {
+    //                 label: 'Best Yield Found',
+    //                 data: runningMax,
+    //                 borderColor: 'rgba(52, 211, 153, 1)', // green-400
+    //                 borderWidth: 2,
+    //                 pointRadius: 0,
+    //                 tension: 0.1,
+    //                 fill: false
+    //             }]
+    //         },
+    //         options: {
+    //             scales: {
+    //                 y: { 
+    //                     beginAtZero: true, 
+    //                     max: 100,
+    //                     ticks: { color: '#9CA3AF' },
+    //                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
+    //                 },
+    //                 x: {
+    //                     ticks: { color: '#9CA3AF' },
+    //                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
+    //                 }
+    //             },
+    //             plugins: {
+    //                 legend: { labels: { color: '#D1D5DB' } },
+    //                 annotation: {
+    //                     annotations: {
+    //                         line1: {
+    //                             type: 'line',
+    //                             xMin: randomPhaseEnd,
+    //                             xMax: randomPhaseEnd,
+    //                             borderColor: 'rgba(251, 191, 36, 0.5)', // yellow-400
+    //                             borderWidth: 2,
+    //                             borderDash: [6, 6],
+    //                             label: {
+    //                                 content: 'Bayesian Phase Starts',
+    //                                 enabled: true,
+    //                                 position: 'start',
+    //                                 color: '#FBBF24',
+    //                                 font: { size: 10 }
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     });
+    // }
     function renderOptimizationResults(data) {
-        // 1. Render Summary
+        // Get all containers
+        const resultsContainer = document.getElementById('optimization-results-state');
+        
+        // Define the new layout using a grid structure
+        resultsContainer.innerHTML = `
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 p-4">
+                <!-- Left Column: Summary & AI Analysis -->
+                <div class="flex flex-col gap-y-6">
+                    <!-- Summary Card -->
+                    <div id="optimization-summary-content" class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <!-- Content will be injected below -->
+                    </div>
+                    <!-- LLM Analysis Card -->
+                    <!-- MODIFICATION: Added "min-h-0" to fix the flexbox scrolling issue -->
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 flex-grow flex flex-col min-h-0">
+                        <h3 class="text-base font-semibold text-gray-200 mb-2 flex items-center">
+                            <i class="fas fa-lightbulb mr-2 text-yellow-400"></i> AI Chemist Analysis
+                        </h3>
+                        <div id="llm-analysis-content" class="prose prose-sm prose-invert max-w-none text-gray-300 overflow-y-auto pr-2 flex-grow">
+                            <!-- LLM suggestions will be injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Chart & History -->
+                <div class="flex flex-col gap-y-6">
+                    <!-- Chart Card -->
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <h3 class="text-base font-semibold text-gray-200 mb-2">Optimization Progress</h3>
+                        <canvas id="optimization-chart-new"></canvas>
+                    </div>
+                    <!-- History Table Card -->
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                         <h3 class="text-base font-semibold text-gray-200 mb-2">Exploration History</h3>
+                        <div id="optimization-history-table" class="overflow-y-auto" style="max-height: 250px;">
+                            <!-- Table will be injected here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // 3. Populate the Summary card
         const summaryContainer = document.getElementById('optimization-summary-content');
         const best = data.best_conditions;
+        const maxConfidence = (data.max_yield / 100).toFixed(3);
+
         summaryContainer.innerHTML = `
-            <div class="flex justify-between items-baseline">
-                <span class="text-sm text-gray-400">Max Yield Found</span>
-                <span class="text-2xl font-bold text-green-400">${data.max_yield.toFixed(2)}%</span>
+            <div class="flex justify-between items-baseline mb-3">
+                <span class="text-sm text-gray-400">Max Confidence Score</span>
+                <span class="text-3xl font-bold text-green-400">${maxConfidence}</span>
             </div>
             <div class="pt-3 border-t border-gray-600">
-                <p class="text-sm font-medium text-gray-300">Best Conditions:</p>
-                <ul class="text-xs list-disc list-inside pl-2 mt-1 space-y-1 text-gray-400">
+                <p class="text-sm font-medium text-gray-300">Highest-Confidence Conditions:</p>
+                <ul class="text-xs list-disc list-inside pl-2 mt-2 space-y-1 text-gray-400">
                     <li><span class="font-semibold">Temperature:</span> ${best.Temperature}°C</li>
                     <li><span class="font-semibold">Solvent:</span> ${best.Solvent}</li>
                     <li><span class="font-semibold">Reagent:</span> ${best.Reagent}</li>
@@ -1417,10 +1626,19 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
 
-        // 2. Render History Table
+        // 4. Populate the LLM Analysis card
+        const llmContainer = document.getElementById('llm-analysis-content');
+        if (data.improvement_suggestions) {
+            // Use marked.js to parse markdown from the LLM
+            llmContainer.innerHTML = marked.parse(data.improvement_suggestions);
+        } else {
+            llmContainer.innerHTML = '<p>No analysis was generated for this optimization run.</p>';
+        }
+
+        // 5. Populate the History Table
         const tableContainer = document.getElementById('optimization-history-table');
         let tableHtml = `<table class="w-full text-left text-xs">
-                            <thead class="bg-gray-800 text-gray-400 uppercase">
+                            <thead class="bg-gray-900 text-gray-400 uppercase sticky top-0">
                                 <tr>
                                     <th class="p-2">#</th>
                                     <th class="p-2">Phase</th>
@@ -1428,37 +1646,40 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <th class="p-2">Solvent</th>
                                     <th class="p-2">Reagent</th>
                                     <th class="p-2">Catalyst</th>
-                                    <th class="p-2 text-right">Yield (%)</th>
+                                    <th class="p-2 text-right">Confidence</th>
                                 </tr>
                             </thead>
                             <tbody class="text-gray-300">`;
         data.optimization_history.forEach(h => {
             const phaseClass = h.phase === 'random_exploration' ? 'text-yellow-400' : 'text-blue-400';
+            const confidence = (h.yield / 100).toFixed(3);
             tableHtml += `
                 <tr class="border-t border-gray-700">
                     <td class="p-2">${h.iteration}</td>
-                    <td class="p-2 ${phaseClass}">${h.phase.replace('_', ' ')}</td>
+                    <td class="p-2 ${phaseClass} capitalize">${h.phase.replace(/_/g, ' ')}</td>
                     <td class="p-2">${h.conditions.Temperature}</td>
-                    <td class="p-2">${h.conditions.Solvent}</td>
-                    <td class="p-2">${h.conditions.Reagent}</td>
-                    <td class="p-2">${h.conditions.Catalyst}</td>
-                    <td class="p-2 text-right font-semibold">${h.yield.toFixed(2)}</td>
+                    <td class="p-2 font-mono">${h.conditions.Solvent}</td>
+                    <td class="p-2 font-mono">${h.conditions.Reagent}</td>
+                    <td class="p-2 font-mono">${h.conditions.Catalyst}</td>
+                    <td class="p-2 text-right font-semibold">${confidence}</td>
                 </tr>`;
         });
         tableHtml += `</tbody></table>`;
         tableContainer.innerHTML = tableHtml;
 
-        // 3. Render Chart
-        const ctx = document.getElementById('optimization-chart').getContext('2d');
+        // 6. Render the new Chart
+        const ctx = document.getElementById('optimization-chart-new').getContext('2d');
         const history = data.optimization_history;
         const labels = history.map(h => h.iteration);
-        const yields = history.map(h => h.yield);
+        
+        // Convert yield (0-100) to confidence (0-1)
+        const confidenceScores = history.map(h => h.yield / 100);
 
-        // Find the running maximum yield
-        let maxYieldSoFar = 0;
-        const runningMax = yields.map(y => {
-            maxYieldSoFar = Math.max(maxYieldSoFar, y);
-            return maxYieldSoFar;
+        // Find the running maximum confidence
+        let maxConfidenceSoFar = 0;
+        const runningMax = confidenceScores.map(c => {
+            maxConfidenceSoFar = Math.max(maxConfidenceSoFar, c);
+            return maxConfidenceSoFar;
         });
         
         const randomPhaseEnd = data.performance_metrics.random_phase_evaluations;
@@ -1472,15 +1693,15 @@ document.addEventListener('DOMContentLoaded', function() {
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Yield per Iteration',
-                    data: yields,
+                    label: 'Confidence per Iteration',
+                    data: confidenceScores,
                     borderColor: 'rgba(96, 165, 250, 0.7)', // blue-400
                     backgroundColor: 'rgba(96, 165, 250, 0.1)',
                     borderWidth: 1,
                     pointRadius: 3,
                     tension: 0.1
                 }, {
-                    label: 'Best Yield Found',
+                    label: 'Best Confidence Found',
                     data: runningMax,
                     borderColor: 'rgba(52, 211, 153, 1)', // green-400
                     borderWidth: 2,
@@ -1493,11 +1714,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 scales: {
                     y: { 
                         beginAtZero: true, 
-                        max: 100,
+                        max: 1.0, // Set max to 1.0 for confidence score
+                        title: {
+                            display: true,
+                            text: 'Confidence Score',
+                            color: '#9CA3AF'
+                        },
                         ticks: { color: '#9CA3AF' },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     x: {
+                        title: {
+                            display: true,
+                            text: 'Iteration',
+                            color: '#9CA3AF'
+                        },
                         ticks: { color: '#9CA3AF' },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     }
@@ -1508,8 +1739,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         annotations: {
                             line1: {
                                 type: 'line',
-                                xMin: randomPhaseEnd,
-                                xMax: randomPhaseEnd,
+                                xMin: randomPhaseEnd - 0.5, // Center the line between points
+                                xMax: randomPhaseEnd - 0.5,
                                 borderColor: 'rgba(251, 191, 36, 0.5)', // yellow-400
                                 borderWidth: 2,
                                 borderDash: [6, 6],
@@ -1517,9 +1748,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                     content: 'Bayesian Phase Starts',
                                     enabled: true,
                                     position: 'start',
+                                    yAdjust: -10,
                                     color: '#FBBF24',
                                     font: { size: 10 }
                                 }
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y.toFixed(3);
+                                }
+                                return label;
                             }
                         }
                     }

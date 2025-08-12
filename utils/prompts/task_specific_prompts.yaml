@@ -105,3 +105,36 @@ evaluate_synthesis_route:
     }}
 
     Provide only the JSON object in your response.
+
+analyze_bo_results:
+  input_variables:
+    - reaction_smiles
+    - best_conditions_str
+    - max_yield
+    - history_summary
+  prompt: |
+    As an expert organic chemist, you are analyzing a Bayesian optimization run for the reaction: `{reaction_smiles}`.
+
+    **Optimization Summary:**
+    - The model predicts a maximum yield of **{max_yield:.2f}%** with the following conditions:
+    {best_conditions_str}
+
+    **Optimization Trajectory (Sample Data):**
+    ```
+    {history_summary}
+    ```
+
+    **Your Task:**
+    Provide a concise analysis in Markdown. **Be brief and direct.**
+
+    1.  **Analysis (1-2 sentences):** Briefly interpret the optimal conditions (e.g., "The results suggest a high-temperature reduction using a bulky phosphine ligand, which is chemically plausible for this transformation.").
+    2.  **Actionable Suggestions (2-3 bullet points):** Provide specific, numbered suggestions for a chemist to try in the lab. Focus on practical advice.
+
+    **Example format:**
+    ### Analysis
+    The optimal conditions point towards...
+
+    ### Actionable Suggestions
+    1.  **Consider an Alternative Solvent:** Since the reaction works well in THF, trying 2-MeTHF could improve solubility and allow for higher reflux temperatures.
+    2.  **Run Under Inert Atmosphere:** The phosphine ligand catalyst is likely air-sensitive. Running the reaction under Argon or Nitrogen is highly recommended to prevent degradation.
+    3.  **Monitor Reaction by TLC/LCMS:** ...

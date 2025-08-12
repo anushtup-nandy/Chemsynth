@@ -20,11 +20,17 @@ from baybe.acquisition import (
     qUpperConfidenceBound   # For batch acquisition
 )
 from rxn_insight.reaction import Reaction
-RXN_INSIGHT_AVAILABLE = True
+from utils.llm_interface import generate_text
+from utils.prompt_loader import format_prompt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info("rxn-insight successfully imported")
+LLM_AVAILABLE = True
+logger.info("LLM interface successfully imported for optimization analysis.")
+# LLM_AVAILABLE = False
+# logger.warning("LLM interface not available. Improvement suggestions will be skipped.")
+RXN_INSIGHT_AVAILABLE = True
 
 try:
     from utils.yield_optimizer import AdvancedYieldPredictor, merge_reaction_with_conditions
@@ -1060,10 +1066,59 @@ def run_true_bayesian_optimization(
         
         random_yields = [h['yield'] for h in optimization_history if h['phase'] == 'random_exploration']
         bayesian_yields = [h['yield'] for h in optimization_history if h['phase'] == 'bayesian_optimization']
+
+        # --- LLM analysis ---
+        improvement_suggestions = "LLM analysis was not available or failed."
+        if LLM_AVAILABLE:
+            try:
+                # Create a concise summary of the history for the prompt
+                best_cond_dict = best_result['conditions']
+                best_conditions_str = (
+                    f"- **Temperature:** {best_cond_dict.get('Temperature', 'N/A')}°C\n"
+                    f"- **Solvent:** {best_cond_dict.get('Solvent', 'N/A')}\n"
+                    f"- **Reagent:** {best_cond_dict.get('Reagent', 'N/A')}\n"
+                    f"- **Catalyst:** {best_cond_dict.get('Catalyst', 'N/A')}"
+                )
+
+                # Create a concise summary of the history for the prompt
+                history_df = pd.DataFrame([h['conditions'] for h in optimization_history])
+                history_df['yield'] = [h['yield'] for h in optimization_history]
+                # Select a diverse and informative subset of the history
+                history_summary_df = pd.concat([
+                    history_df.head(5), 
+                    history_df.nlargest(5, 'yield'),
+                    history_df.tail(5)
+                ]).drop_duplicates().to_string(index=False)
+                
+                prompt_text = format_prompt(
+                    "analyze_bo_results",
+                    "task_specific_prompts.yaml",
+                    reaction_smiles=naked_reaction_smiles,
+                    best_conditions_str=best_conditions_str, # Pass the formatted string
+                    max_yield=best_result['yield'],
+                    history_summary=history_summary_df
+                )
+
+                if prompt_text:
+                    logger.info("Generating LLM-based improvement suggestions...")
+                    llm_response = generate_text(prompt_text, temperature=0.6)
+                    if llm_response:
+                        improvement_suggestions = llm_response
+                    else:
+                        improvement_suggestions = "The LLM could not generate suggestions for this reaction."
+                else:
+                    improvement_suggestions = "Failed to format the analysis prompt for the LLM."
+
+            except Exception as llm_e:
+                logger.error(f"LLM analysis step failed: {llm_e}", exc_info=True)
+                improvement_suggestions = f"An error occurred during LLM analysis: {llm_e}"
+        # --- END OF NEW LLM ANALYSIS STEP ---
         
-        return {
+        # Construct the final result object
+        final_result = {
             "best_conditions": best_result['conditions'],
             "max_yield": best_result['yield'],
+            "improvement_suggestions": improvement_suggestions, # NEW KEY
             "optimization_history": optimization_history,
             "search_space_summary": {
                 "solvents": final_solvents,
@@ -1079,7 +1134,7 @@ def run_true_bayesian_optimization(
                 "user_constraints": user_constraints
             },
             "rxn_insight_analysis": {
-                **rxn_insight_metadata,  # Include all the rich metadata
+                **rxn_insight_metadata,
                 "condition_rankings": rxn_insight_metadata.get('top_ranked_conditions', {}),
                 "statistical_confidence": rxn_insight_metadata.get('condition_statistics', {}),
                 "data_quality": {
@@ -1099,7 +1154,51 @@ def run_true_bayesian_optimization(
                 "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}"
             }
         }
+        return final_result
         
     except Exception as e:
         logger.error(f"Error processing results: {e}", exc_info=True)
         return {"error": f"Failed to process results: {e}"}
+        
+    #     return {
+    #         "best_conditions": best_result['conditions'],
+    #         "max_yield": best_result['yield'],
+    #         "optimization_history": optimization_history,
+    #         "search_space_summary": {
+    #             "solvents": final_solvents,
+    #             "reagents": final_reagents,
+    #             "catalysts": final_catalysts,
+    #             "temperature_range": [round(temp_min, 1), round(temp_max, 1)]
+    #         },
+    #         "constraints_applied": {
+    #             "temperature_constrained": user_constraints['temperature_range'] is not None,
+    #             "solvents_constrained": user_constraints['solvents'] is not None,
+    #             "reagents_constrained": user_constraints['reagents'] is not None,
+    #             "catalysts_constrained": user_constraints['catalysts'] is not None,
+    #             "user_constraints": user_constraints
+    #         },
+    #         "rxn_insight_analysis": {
+    #             **rxn_insight_metadata,  # Include all the rich metadata
+    #             "condition_rankings": rxn_insight_metadata.get('top_ranked_conditions', {}),
+    #             "statistical_confidence": rxn_insight_metadata.get('condition_statistics', {}),
+    #             "data_quality": {
+    #                 "similar_reactions_count": rxn_insight_metadata.get('data_sources', 0),
+    #                 "reaction_classification_confidence": rxn_insight_metadata.get('reaction_confidence', 0),
+    #                 "temperature_data_points": rxn_insight_metadata.get('condition_statistics', {}).get('temperature_data_points', 0)
+    #             }
+    #         },
+    #         "performance_metrics": {
+    #             "total_evaluations": len(optimization_history),
+    #             "random_phase_evaluations": len(random_yields),
+    #             "bayesian_phase_evaluations": len(bayesian_yields),
+    #             "avg_random_yield": round(np.mean(random_yields), 2) if random_yields else 0,
+    #             "avg_bayesian_yield": round(np.mean(bayesian_yields), 2) if bayesian_yields else 0,
+    #             "acquisition_performance": acq_performance,
+    #             "improvement_over_random": round(np.mean(bayesian_yields) - np.mean(random_yields), 2) if bayesian_yields and random_yields else 0,
+    #             "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}"
+    #         }
+    #     }
+        
+    # except Exception as e:
+    #     logger.error(f"Error processing results: {e}", exc_info=True)
+    #     return {"error": f"Failed to process results: {e}"}
