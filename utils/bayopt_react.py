@@ -576,6 +576,7 @@ def run_true_bayesian_optimization(
 ) -> Dict[str, Any]:
     """
     Enhanced Bayesian optimization with rxn-insight integration for expanded condition space.
+    Fixed to properly handle user constraints without overriding them.
     """
     logger.info(f"Starting ENHANCED Bayesian Optimization for: {naked_reaction_smiles}")
     
@@ -587,10 +588,35 @@ def run_true_bayesian_optimization(
     if oracle is None:
         return {"error": "Could not initialize the simulation oracle"}
     
-    constraint_temp_range = None
-    constraint_solvents = None
-    constraint_reagents = None
-    constraint_catalysts = None
+    # ========================================================================
+    # EARLY CONSTRAINT EXTRACTION - Extract all constraints at the beginning
+    # ========================================================================
+    user_constraints = {
+        'temperature_range': None,
+        'solvents': None,
+        'reagents': None,
+        'catalysts': None
+    }
+    
+    if prior_knowledge and 'constraints' in prior_knowledge:
+        constraints = prior_knowledge['constraints']
+        logger.info("User constraints detected - extracting and preserving them")
+        
+        if 'temperature_range' in constraints and len(constraints['temperature_range']) == 2:
+            user_constraints['temperature_range'] = constraints['temperature_range']
+            logger.info(f"USER CONSTRAINT: Temperature range = {constraints['temperature_range']}")
+        
+        if 'solvents' in constraints and constraints['solvents']:
+            user_constraints['solvents'] = constraints['solvents']
+            logger.info(f"USER CONSTRAINT: Solvents = {constraints['solvents']}")
+            
+        if 'reagents' in constraints and constraints['reagents']:
+            user_constraints['reagents'] = constraints['reagents']
+            logger.info(f"USER CONSTRAINT: Reagents = {constraints['reagents']}")
+            
+        if 'catalysts' in constraints and constraints['catalysts']:
+            user_constraints['catalysts'] = constraints['catalysts']
+            logger.info(f"USER CONSTRAINT: Catalysts = {constraints['catalysts']}")
 
     # ENHANCED Generate Search Space with rxn-insight integration
     try:
@@ -605,23 +631,23 @@ def run_true_bayesian_optimization(
             return {"error": "Could not generate initial candidate conditions"}
 
         # Process RCR model conditions
-        temps = []
-        solvents = set()
-        reagents = set()
-        catalysts = set()
+        model_temps = []
+        model_solvents = set()
+        model_reagents = set()
+        model_catalysts = set()
         
         for cond in initial_conditions:
             if len(cond) >= 4:
                 temp, solvent, reagent, catalyst = cond[0], cond[1], cond[2], cond[3]
                 
                 if temp is not None and isinstance(temp, (int, float)):
-                    temps.append(float(temp))
+                    model_temps.append(float(temp))
                 if solvent and isinstance(solvent, str) and solvent.strip():
-                    solvents.add(solvent.strip())
+                    model_solvents.add(solvent.strip())
                 if reagent and isinstance(reagent, str) and reagent.strip():
-                    reagents.add(reagent.strip())
+                    model_reagents.add(reagent.strip())
                 if catalyst and isinstance(catalyst, str) and catalyst.strip():
-                    catalysts.add(catalyst.strip())
+                    model_catalysts.add(catalyst.strip())
         
         # ENHANCED: Advanced rxn-insight integration with intelligent merging
         rxn_insight_metadata = {}
@@ -642,24 +668,25 @@ def run_true_bayesian_optimization(
                     rxn_catalysts = set(rxn_insight_conditions.get('catalysts', []))
                     
                     # Priority merge: rxn-insight first, then RCR model conditions
-                    solvents = list(rxn_solvents) + [s for s in solvents if s not in rxn_solvents]
-                    reagents = list(rxn_reagents) + [r for r in reagents if r not in rxn_reagents]
-                    catalysts = list(rxn_catalysts) + [c for c in catalysts if c not in rxn_catalysts]
+                    model_solvents = list(rxn_solvents) + [s for s in model_solvents if s not in rxn_solvents]
+                    model_reagents = list(rxn_reagents) + [r for r in model_reagents if r not in rxn_reagents]
+                    model_catalysts = list(rxn_catalysts) + [c for c in model_catalysts if c not in rxn_catalysts]
                     
-                    # Advanced temperature integration
-                    temp_analysis = rxn_insight_conditions.get('temperature_analysis', {})
-                    if temp_analysis and 'recommended_range' in temp_analysis:
-                        rxn_temp_range = temp_analysis['recommended_range']
-                        if len(rxn_temp_range) == 2:
-                            # Use rxn-insight temperature range if statistically significant
-                            data_points = temp_analysis.get('data_points', 0)
-                            if data_points >= 3:  # Sufficient data
-                                temp_min, temp_max = rxn_temp_range
-                                logger.info(f"Using rxn-insight temperature range: {temp_min:.1f}-{temp_max:.1f}°C "
-                                           f"(based on {data_points} similar reactions)")
+                    # Advanced temperature integration (only if no user constraints)
+                    if not user_constraints['temperature_range']:
+                        temp_analysis = rxn_insight_conditions.get('temperature_analysis', {})
+                        if temp_analysis and 'recommended_range' in temp_analysis:
+                            rxn_temp_range = temp_analysis['recommended_range']
+                            if len(rxn_temp_range) == 2:
+                                # Use rxn-insight temperature range if statistically significant
+                                data_points = temp_analysis.get('data_points', 0)
+                                if data_points >= 3:  # Sufficient data
+                                    model_temps = rxn_temp_range
+                                    logger.info(f"Using rxn-insight temperature range: {rxn_temp_range[0]:.1f}-{rxn_temp_range[1]:.1f}°C "
+                                               f"(based on {data_points} similar reactions)")
                     
-                    logger.info(f"Enhanced search space: {len(solvents)} solvents, "
-                               f"{len(reagents)} reagents, {len(catalysts)} catalysts")
+                    logger.info(f"Enhanced search space: {len(model_solvents)} solvents, "
+                               f"{len(model_reagents)} reagents, {len(model_catalysts)} catalysts")
                     logger.info(f"Data sources: {rxn_insight_metadata.get('data_sources', 0)} similar reactions analyzed")
                 else:
                     logger.warning("rxn-insight analysis unsuccessful, using RCR-only conditions")
@@ -668,64 +695,88 @@ def run_true_bayesian_optimization(
                 logger.warning(f"Advanced rxn-insight integration failed: {e}")
                 rxn_insight_metadata = {'analysis_successful': False, 'error': str(e)}
         
-        # Apply intelligent filtering based on rxn-insight rankings
-        if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
-            # Use statistical ranking from rxn-insight instead of arbitrary limits
-            top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
-            
-            # Prioritize statistically significant conditions
-            if 'solvents' in top_conditions:
-                priority_solvents = [item['name'] for item in top_conditions['solvents']]
-                other_solvents = [s for s in solvents if s not in priority_solvents and s and len(s) < 50]
-                solvents = priority_solvents + other_solvents[:max(0, 25-len(priority_solvents))]
-            else:
-                solvents = sorted([s for s in solvents if s and len(s) < 50])[:25]
-            
-            if 'reagents' in top_conditions:
-                priority_reagents = [item['name'] for item in top_conditions['reagents']]
-                other_reagents = [r for r in reagents if r not in priority_reagents and r and len(r) < 50]
-                reagents = priority_reagents + other_reagents[:max(0, 20-len(priority_reagents))]
-            else:
-                reagents = sorted([r for r in reagents if r and len(r) < 50])[:20]
-            
-            if 'catalysts' in top_conditions:
-                priority_catalysts = [item['name'] for item in top_conditions['catalysts']]
-                other_catalysts = [c for c in catalysts if c not in priority_catalysts and c and len(c) < 50]
-                catalysts = priority_catalysts + other_catalysts[:max(0, 20-len(priority_catalysts))]
-            else:
-                catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:20]
-        else:
-            # Fallback to larger limits when rxn-insight unavailable
-            solvents = sorted([s for s in solvents if s and len(s) < 50])[:25]   
-            reagents = sorted([r for r in reagents if r and len(r) < 50])[:30]  
-            catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:25]
-
-        if prior_knowledge and 'constraints' in prior_knowledge:
-            constraints = prior_knowledge['constraints']
-            logger.info("Applying user-defined search space constraints.")
-            
-            if 'solvents' in constraints and constraints['solvents']:
-                solvents = constraints['solvents']
-                logger.info(f"Overriding solvents with: {solvents}")
-            if 'reagents' in constraints and constraints['reagents']:
-                reagents = constraints['reagents']
-                logger.info(f"Overriding reagents with: {reagents}")
-            if 'catalysts' in constraints and constraints['catalysts']:
-                catalysts = constraints['catalysts']
-                logger.info(f"Overriding catalysts with: {catalysts}")
-            if 'temperature_range' in constraints and len(constraints['temperature_range']) == 2:
-                temp_min, temp_max = constraints['temperature_range']
-                logger.info(f"Overriding temperature range with: {temp_min}°C to {temp_max}°C")
+        # ========================================================================
+        # CONSTRAINT APPLICATION - Apply user constraints or use model predictions
+        # ========================================================================
         
-        # Add "None" options for optional components
-        if "None" not in reagents:
-            reagents.append("None")
-        if "None" not in catalysts:
-            catalysts.append("None")
+        # SOLVENTS: User constraints take absolute priority
+        if user_constraints['solvents'] is not None:
+            final_solvents = user_constraints['solvents']
+            logger.info(f"USING USER SOLVENT CONSTRAINTS: {len(final_solvents)} solvents")
+        else:
+            # Apply intelligent filtering based on rxn-insight rankings
+            if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
+                top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
+                if 'solvents' in top_conditions:
+                    priority_solvents = [item['name'] for item in top_conditions['solvents']]
+                    other_solvents = [s for s in model_solvents if s not in priority_solvents and s and len(s) < 50]
+                    final_solvents = priority_solvents + other_solvents[:max(0, 25-len(priority_solvents))]
+                else:
+                    final_solvents = sorted([s for s in model_solvents if s and len(s) < 50])[:25]
+            else:
+                final_solvents = sorted([s for s in model_solvents if s and len(s) < 50])[:25]
+            logger.info(f"USING MODEL-BASED SOLVENTS: {len(final_solvents)} solvents")
+        
+        # REAGENTS: User constraints take absolute priority
+        if user_constraints['reagents'] is not None:
+            final_reagents = user_constraints['reagents']
+            logger.info(f"USING USER REAGENT CONSTRAINTS: {len(final_reagents)} reagents")
+        else:
+            if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
+                top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
+                if 'reagents' in top_conditions:
+                    priority_reagents = [item['name'] for item in top_conditions['reagents']]
+                    other_reagents = [r for r in model_reagents if r not in priority_reagents and r and len(r) < 50]
+                    final_reagents = priority_reagents + other_reagents[:max(0, 20-len(priority_reagents))]
+                else:
+                    final_reagents = sorted([r for r in model_reagents if r and len(r) < 50])[:20]
+            else:
+                final_reagents = sorted([r for r in model_reagents if r and len(r) < 50])[:30]
+            logger.info(f"USING MODEL-BASED REAGENTS: {len(final_reagents)} reagents")
+        
+        # CATALYSTS: User constraints take absolute priority
+        if user_constraints['catalysts'] is not None:
+            final_catalysts = user_constraints['catalysts']
+            logger.info(f"USING USER CATALYST CONSTRAINTS: {len(final_catalysts)} catalysts")
+        else:
+            if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
+                top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
+                if 'catalysts' in top_conditions:
+                    priority_catalysts = [item['name'] for item in top_conditions['catalysts']]
+                    other_catalysts = [c for c in model_catalysts if c not in priority_catalysts and c and len(c) < 50]
+                    final_catalysts = priority_catalysts + other_catalysts[:max(0, 20-len(priority_catalysts))]
+                else:
+                    final_catalysts = sorted([c for c in model_catalysts if c and len(c) < 50])[:20]
+            else:
+                final_catalysts = sorted([c for c in model_catalysts if c and len(c) < 50])[:25]
+            logger.info(f"USING MODEL-BASED CATALYSTS: {len(final_catalysts)} catalysts")
             
-        # Ensure we have fallback options
-        if not solvents:
-            solvents = [
+        # TEMPERATURE: User constraints take absolute priority
+        if user_constraints['temperature_range'] is not None:
+            temp_min, temp_max = user_constraints['temperature_range']
+            logger.info(f"USING USER TEMPERATURE CONSTRAINTS: {temp_min}°C to {temp_max}°C")
+        else:
+            # Use model-based temperature range
+            if model_temps:
+                model_temps = [t for t in model_temps if -100 <= t <= 400]  # Filter reasonable temperatures
+                temp_min, temp_max = min(model_temps), max(model_temps)
+                if temp_max - temp_min < 10.0:  # Ensure reasonable range
+                    temp_center = (temp_min + temp_max) / 2
+                    temp_min = max(0, temp_center - 25)
+                    temp_max = min(300, temp_center + 25)
+            else:
+                temp_min, temp_max = -100.0, 200.0
+            logger.info(f"USING MODEL-BASED TEMPERATURE RANGE: {temp_min:.1f}°C to {temp_max:.1f}°C")
+            
+        # Add "None" options for optional components if not constrained
+        if "None" not in final_reagents:
+            final_reagents.append("None")
+        if "None" not in final_catalysts:
+            final_catalysts.append("None")
+            
+        # Ensure we have fallback options when no model data available
+        if not final_solvents:
+            final_solvents = [
                 "C1CCOC1",      # THF
                 "CCOCC",        # Diethyl ether  
                 "ClCCl",        # DCM
@@ -738,8 +789,8 @@ def run_true_bayesian_optimization(
                 "ClC(Cl)Cl"     # Chloroform
             ]
 
-        if not reagents:
-            reagents = [
+        if not final_reagents or final_reagents == ["None"]:
+            final_reagents = [
                 "None", "O", "Cl", "F", "Br", "I",           # Basic reagents
                 "[Li+]", "[Na+]", "[K+]",                    # Metal cations
                 "CCN(CC)CC",                                  # Triethylamine
@@ -749,8 +800,8 @@ def run_true_bayesian_optimization(
                 "ClS(=O)(=O)c1ccc(C)cc1"                    # TsCl
             ]
 
-        if not catalysts:
-            catalysts = [
+        if not final_catalysts or final_catalysts == ["None"]:
+            final_catalysts = [
                 "None",
                 "[Pd]",                    # Palladium
                 "[Ni]", 
@@ -759,42 +810,32 @@ def run_true_bayesian_optimization(
                 "CC1(C)c2cccc(P(c3ccccc3)c3ccccc3)c2Oc2c(P(c3ccccc3)c3ccccc3)cccc21"  # BINAP
             ]
         
-        # Enhanced temperature range
-        if temps:
-            temps = [t for t in temps if -100 <= t <= 400]  # Filter reasonable temperatures
-            temp_min, temp_max = min(temps), max(temps)
-            if temp_max - temp_min < 10.0:  # Ensure reasonable range
-                temp_center = (temp_min + temp_max) / 2
-                temp_min = max(0, temp_center - 25)
-                temp_max = min(300, temp_center + 25)
-        else:
-            temp_min, temp_max = -100.0, 200.0
-        
-        logger.info(f"Final search space: {len(solvents)} solvents, {len(reagents)} reagents, "
-                   f"{len(catalysts)} catalysts, temp range: {temp_min:.1f}-{temp_max:.1f}°C")
+        logger.info(f"FINAL SEARCH SPACE: {len(final_solvents)} solvents, {len(final_reagents)} reagents, "
+                   f"{len(final_catalysts)} catalysts, temp range: {temp_min:.1f}-{temp_max:.1f}°C")
 
     except Exception as e:
         logger.error(f"Error generating enhanced search space: {e}", exc_info=True)
         return {"error": f"Failed to generate search space: {e}"}
 
-    # Create Search Space (keep existing logic but log the enhanced space)
+    # Create Search Space with properly constrained parameters
     try:
         parameters = []
         
-        if len(solvents) > 1:
-            parameters.append(CategoricalParameter(name="Solvent", values=solvents, encoding="OHE"))
-        if len(reagents) > 1:
-            parameters.append(CategoricalParameter(name="Reagent", values=reagents, encoding="OHE"))
-        if len(catalysts) > 1:
-            parameters.append(CategoricalParameter(name="Catalyst", values=catalysts, encoding="OHE"))
+        if len(final_solvents) > 1:
+            parameters.append(CategoricalParameter(name="Solvent", values=final_solvents, encoding="OHE"))
+        if len(final_reagents) > 1:
+            parameters.append(CategoricalParameter(name="Reagent", values=final_reagents, encoding="OHE"))
+        if len(final_catalysts) > 1:
+            parameters.append(CategoricalParameter(name="Catalyst", values=final_catalysts, encoding="OHE"))
             
+        # Temperature parameter with preserved constraints
         parameters.append(NumericalContinuousParameter(
             name="Temperature",
             bounds=(temp_min, temp_max)
         ))
 
         searchspace = SearchSpace.from_product(parameters)
-        logger.info(f"Created search space with {len(parameters)} parameters")
+        logger.info(f"Created constrained search space with {len(parameters)} parameters")
 
     except Exception as e:
         logger.error(f"Error creating search space: {e}", exc_info=True)
@@ -825,9 +866,9 @@ def run_true_bayesian_optimization(
             # Evaluate entire batch
             for idx, (_, rec) in enumerate(recommendations.iterrows()):
                 temp = rec['Temperature']
-                solvent = rec.get('Solvent', solvents[0])
-                reagent = rec.get('Reagent', reagents[0])
-                catalyst = rec.get('Catalyst', catalysts[0])
+                solvent = rec.get('Solvent', final_solvents[0])
+                reagent = rec.get('Reagent', final_reagents[0])
+                catalyst = rec.get('Catalyst', final_catalysts[0])
                 
                 condition_dict = {
                     'solvent': solvent,
@@ -890,6 +931,7 @@ def run_true_bayesian_optimization(
     except Exception as e:
         logger.warning(f"Failed to transfer measurements: {e}")
 
+    # Add prior knowledge data points if provided
     if prior_knowledge and 'data_points' in prior_knowledge and prior_knowledge['data_points']:
         logger.info(f"Adding {len(prior_knowledge['data_points'])} prior data points to the campaign.")
         try:
@@ -954,9 +996,9 @@ def run_true_bayesian_optimization(
             # Evaluate batch
             for idx, (_, rec) in enumerate(recommendations.iterrows()):
                 temp = rec['Temperature']
-                solvent = rec.get('Solvent', solvents[0])
-                reagent = rec.get('Reagent', reagents[0])
-                catalyst = rec.get('Catalyst', catalysts[0])
+                solvent = rec.get('Solvent', final_solvents[0])
+                reagent = rec.get('Reagent', final_reagents[0])
+                catalyst = rec.get('Catalyst', final_catalysts[0])
                 
                 condition_dict = {
                     'solvent': solvent,
@@ -996,7 +1038,7 @@ def run_true_bayesian_optimization(
             logger.warning(f"Bayesian iteration {i+1} failed: {e}")
             continue
 
-    # Enhanced results processing (ADD acquisition strategy info)
+    # Enhanced results processing
     if not optimization_history:
         return {"error": "No successful optimization iterations"}
     
@@ -1024,10 +1066,17 @@ def run_true_bayesian_optimization(
             "max_yield": best_result['yield'],
             "optimization_history": optimization_history,
             "search_space_summary": {
-                "solvents": solvents,
-                "reagents": reagents,
-                "catalysts": catalysts,
+                "solvents": final_solvents,
+                "reagents": final_reagents,
+                "catalysts": final_catalysts,
                 "temperature_range": [round(temp_min, 1), round(temp_max, 1)]
+            },
+            "constraints_applied": {
+                "temperature_constrained": user_constraints['temperature_range'] is not None,
+                "solvents_constrained": user_constraints['solvents'] is not None,
+                "reagents_constrained": user_constraints['reagents'] is not None,
+                "catalysts_constrained": user_constraints['catalysts'] is not None,
+                "user_constraints": user_constraints
             },
             "rxn_insight_analysis": {
                 **rxn_insight_metadata,  # Include all the rich metadata
@@ -1054,26 +1103,3 @@ def run_true_bayesian_optimization(
     except Exception as e:
         logger.error(f"Error processing results: {e}", exc_info=True)
         return {"error": f"Failed to process results: {e}"}
-
-# Test function
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    
-    test_reaction = "Cl[Si](Cl)(Cl)Cl.c1ccccc1[Mg]Br>>Cl[Si](Cl)(Cl)c1ccccc1"
-    
-    print("\n" + "="*70)
-    print(f"RUNNING ENHANCED BAYESIAN OPTIMIZATION WITH RXN-INSIGHT FOR:\n{test_reaction}")
-    print("="*70 + "\n")
-    
-    results = run_true_bayesian_optimization(
-        naked_reaction_smiles=test_reaction,
-        num_initial_candidates=40,     
-        num_iterations=30,             
-        num_random_init=10,             
-        use_adaptive_strategy=True,
-        initial_batch_size=4,           
-        use_rxn_insight=True
-    )
-
-    import json
-    print(json.dumps(results, indent=2))
