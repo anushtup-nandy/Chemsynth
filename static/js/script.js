@@ -42,10 +42,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Bayesian optimiation ---
     const optimizationModal = document.getElementById('optimization-modal');
     const closeOptimizationModalBtn = document.getElementById('close-optimization-modal-btn');
+    const setupState = document.getElementById('optimization-setup-state');
+    const loadingState = document.getElementById('optimization-loading-state');
+    const resultsState = document.getElementById('optimization-results-state');
+    const startOptimizationBtn = document.getElementById('start-optimization-btn');
+    const addDataPointBtn = document.getElementById('add-data-point-btn');
+    const dataPointsContainer = document.getElementById('prior-data-points-container');
+
+    let currentOptimizationSmiles = '';
 
     // --- Initial State Setup ---
     updateProgress(0);
     setupTabControls();
+    
+    // Store the current reaction SMILES when the modal is opened
 
     // --- Event Listeners ---
     searchButton.addEventListener('click', handleSearch);
@@ -61,6 +71,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Bayesian optimization --- 
     closeOptimizationModalBtn.addEventListener('click', () => optimizationModal.classList.add('hidden'));
+    startOptimizationBtn.addEventListener('click', startOptimizationWithPriors);
+    addDataPointBtn.addEventListener('click', addPriorDataPointRow);
 
     // --- Dynamic event listeners for expanding reactants/visualizations ---
     routeContentContainer.addEventListener('click', function(e) {
@@ -591,7 +603,7 @@ document.addEventListener('DOMContentLoaded', function() {
             stepsHtml += `<span class="${statusClass}">${name}</span>`;
         });
         progressStepsContainer.innerHTML = stepsHtml;
-        if(stage >= 4) updateProgress(5); // Complete knowledge stage
+        //if(stage >= 4) updateProgress(5); // Complete knowledge stage
     }
 
     function renderRouteTabs(routes, activeRouteId) {
@@ -642,39 +654,6 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         routeContentContainer.innerHTML = contentHtml;
     }
-
-    // function renderRouteVisualization(route) {
-    //     if (!route.steps || route.steps.length === 0) return '';
-    //     let vizHtml = '<div class="reaction-visualization mb-6"><div class="flex items-center justify-start mb-8 overflow-x-auto p-4">';
-        
-    //     const firstReactants = route.steps[0].reactants;
-    //     const reactantNames = firstReactants.map(r => r.formula || 'Reactant').join(' + ');
-    //     vizHtml += `
-    //         <div class="molecule-display flex-shrink-0">
-    //             <div class="text-center p-4">
-    //                 <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
-    //                 <div class="font-bold">${reactantNames}</div>
-    //             </div>
-    //         </div>`;
-
-    //     route.steps.forEach(step => {
-    //         const isFinalProduct = step.product.smiles === currentTargetSMILES;
-    //         const borderColor = isFinalProduct ? 'border-2 border-blue-500' : '';
-    //         const textColor = isFinalProduct ? 'text-blue-400' : '';
-    //         const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
-    //         vizHtml += `
-    //             <div class="reaction-arrow flex-shrink-0 mx-4 my-4 md:my-0"><i class="fas fa-long-arrow-alt-right text-2xl text-gray-500"></i></div>
-    //             <div class="molecule-display ${borderColor} flex-shrink-0">
-    //                 <div class="text-center p-4">
-    //                     <div class="text-xs text-gray-400 mb-1">Step ${step.step_number}: ${(step.yield || 0).toFixed(1)}% yield</div>
-    //                     <div class="font-bold ${textColor}">${titleText}</div>
-    //                     <div class="text-xs text-gray-400 mt-1">${step.product.formula}</div>
-    //                 </div>
-    //             </div>`;
-    //     });
-    //     vizHtml += '</div></div>';
-    //     return vizHtml;
-    // }
 
     function renderRouteVisualization(route) {
         if (!route.steps || route.steps.length === 0) return '';
@@ -1285,33 +1264,121 @@ document.addEventListener('DOMContentLoaded', function() {
      * Handles the click on an "Optimize" button for a reaction step.
      * @param {string} nakedSmiles The naked reaction SMILES to optimize.
      */
-    async function handleOptimizeStep(nakedSmiles) {
-        console.log("Optimizing reaction:", nakedSmiles);
-        const modal = document.getElementById('optimization-modal');
-        const loadingState = document.getElementById('optimization-loading-state');
-        const resultsState = document.getElementById('optimization-results-state');
+    function handleOptimizeStep(nakedSmiles) {
+        console.log("Setting up optimization for:", nakedSmiles);
+        currentOptimizationSmiles = nakedSmiles;
 
-        // Reset and show modal in loading state
-        modal.classList.remove('hidden');
-        loadingState.classList.remove('hidden');
+        optimizationModal.classList.remove('hidden');
+        setupState.classList.remove('hidden');
+        loadingState.classList.add('hidden');
         resultsState.classList.add('hidden');
+        
+        // Reset the UI
+        dataPointsContainer.innerHTML = '';
+        document.getElementById('prior-solvents').value = '';
+        document.getElementById('prior-reagents').value = '';
+        document.getElementById('prior-catalysts').value = '';
+        document.getElementById('prior-temp-min').value = '';
+        document.getElementById('prior-temp-max').value = '';
         if (optimizationChartInstance) {
             optimizationChartInstance.destroy();
         }
+    }
 
+    /**
+     * Adds a new empty row for entering a prior data point.
+     */
+    function addPriorDataPointRow() {
+        const dataRowHtml = `
+            <div class="prior-data-row grid grid-cols-5 gap-2 items-center bg-gray-800 p-2 rounded">
+                <input type="number" data-key="Temperature" class="molecule-input text-xs" placeholder="Temp (°C)">
+                <input type="text" data-key="Solvent" class="molecule-input text-xs" placeholder="Solvent SMILES">
+                <input type="text" data-key="Reagent" class="molecule-input text-xs" placeholder="Reagent SMILES">
+                <input type="text" data-key="Catalyst" class="molecule-input text-xs" placeholder="Catalyst SMILES">
+                <input type="number" data-key="Yield" class="molecule-input text-xs font-bold" placeholder="Yield (%)">
+            </div>
+        `;
+        dataPointsContainer.insertAdjacentHTML('beforeend', dataRowHtml);
+    }
+
+    /**
+     * Gathers prior knowledge from the UI, constructs the payload, and calls the API.
+     */
+    async function startOptimizationWithPriors() {
+        if (!currentOptimizationSmiles) {
+            alert("Error: No reaction SMILES specified for optimization.");
+            return;
+        }
+
+        setupState.classList.add('hidden');
+        loadingState.classList.remove('hidden');
+        resultsState.classList.add('hidden');
+        
+        // 1. Gather constraints
+        const constraints = {};
+        const solvents = document.getElementById('prior-solvents').value.trim();
+        if (solvents) constraints.solvents = solvents.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+
+        const reagents = document.getElementById('prior-reagents').value.trim();
+        if (reagents) constraints.reagents = reagents.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+
+        const catalysts = document.getElementById('prior-catalysts').value.trim();
+        if (catalysts) constraints.catalysts = catalysts.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+
+        const tempMin = parseFloat(document.getElementById('prior-temp-min').value);
+        const tempMax = parseFloat(document.getElementById('prior-temp-max').value);
+        if (!isNaN(tempMin) && !isNaN(tempMax)) {
+            constraints.temperature_range = [tempMin, tempMax];
+        }
+
+        // 2. Gather data points
+        const dataPoints = [];
+        document.querySelectorAll('.prior-data-row').forEach(row => {
+            const conditions = {};
+            let yieldVal = null;
+            let hasData = false;
+
+            row.querySelectorAll('input').forEach(input => {
+                const key = input.dataset.key;
+                const value = input.value.trim();
+                if (value) {
+                    hasData = true;
+                    if (key === 'Yield') {
+                        yieldVal = parseFloat(value);
+                    } else if (key === 'Temperature') {
+                        conditions[key] = parseFloat(value);
+                    } else {
+                        conditions[key] = value;
+                    }
+                }
+            });
+
+            if (hasData && yieldVal !== null && !isNaN(yieldVal)) {
+                dataPoints.push({ conditions, yield: yieldVal });
+            }
+        });
+        
+        // 3. Construct the payload
+        const priorKnowledge = {};
+        if (Object.keys(constraints).length > 0) priorKnowledge.constraints = constraints;
+        if (dataPoints.length > 0) priorKnowledge.data_points = dataPoints;
+
+        const payload = {
+            naked_reaction_smiles: currentOptimizationSmiles,
+            prior_knowledge: Object.keys(priorKnowledge).length > 0 ? priorKnowledge : null,
+        };
+        
+        // 4. Call the API
         try {
             const response = await fetch('/api/optimize_reaction', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ naked_reaction_smiles: nakedSmiles }),
+                body: JSON.stringify(payload),
             });
 
             const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.error || "Optimization failed.");
-            }
-
-            // Render results and switch view
+            if (!response.ok) throw new Error(data.error || "Optimization failed.");
+            
             renderOptimizationResults(data);
             loadingState.classList.add('hidden');
             resultsState.classList.remove('hidden');

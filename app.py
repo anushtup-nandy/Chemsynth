@@ -268,24 +268,23 @@ def api_analyze_sourcing():
 def api_optimize_reaction():
     """
     API endpoint to perform detailed Bayesian Optimization for a single reaction step.
-    Accepts a naked reaction SMILES string.
+    Accepts a naked reaction SMILES string and optional prior knowledge.
     """
     data = request.json
     naked_reaction_smiles = data.get('naked_reaction_smiles')
     num_iterations = int(data.get('num_iterations', 30))
     num_random_init = int(data.get('num_random_init', 10))
+    prior_knowledge = data.get('prior_knowledge', None)
 
     if not naked_reaction_smiles:
         return jsonify({"error": "Naked reaction SMILES is required for optimization."}), 400
 
     try:
         print(f"Starting Bayesian Optimization for: '{naked_reaction_smiles}'")
-        # Call the main function from bayopt_react.py
-        results = run_true_bayesian_optimization(
-            naked_reaction_smiles=naked_reaction_smiles,
-            num_iterations=num_iterations,
-            num_random_init=num_random_init
-        )
+        if prior_knowledge:
+            print("With prior knowledge provided.")
+            
+        # --- MODIFIED: Pass the prior_knowledge to the function ---
         results = run_true_bayesian_optimization(
             naked_reaction_smiles=naked_reaction_smiles,
             num_initial_candidates=40,     
@@ -293,10 +292,11 @@ def api_optimize_reaction():
             num_random_init=num_random_init,             
             use_adaptive_strategy=True,
             initial_batch_size=4,           
-            use_rxn_insight=True
+            use_rxn_insight=True,
+            prior_knowledge=prior_knowledge # Pass the new argument
         )
+
         if "error" in results:
-            # Pass through errors from the optimization script
             return jsonify(results), 400
         
         return jsonify(results)

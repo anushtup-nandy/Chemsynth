@@ -234,28 +234,70 @@
     </div>
 
     <!-- Bayesian Optimization Modal -->
-    <div id="optimization-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
-        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-            <!-- Header -->
+    <div id="optimization-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-6xl h-[90vh] flex flex-col">
             <div class="flex justify-between items-center p-4 border-b border-gray-700">
-                <h3 class="text-xl font-bold text-white">Reaction Condition Optimization</h3>
-                <button id="close-optimization-modal-btn" class="text-gray-400 hover:text-white">
-                    <i class="fas fa-times fa-lg"></i>
-                </button>
+                <h3 class="text-lg font-bold text-white">Bayesian Reaction Optimization</h3>
+                <button id="close-optimization-modal-btn" class="text-gray-400 hover:text-white">&times;</button>
             </div>
 
-            <!-- Content -->
-            <div id="optimization-modal-content" class="p-6 overflow-y-auto">
-                <!-- Loading State -->
-                <div id="optimization-loading-state" class="text-center py-16">
-                    <i class="fas fa-atom fa-spin text-blue-400 text-4xl"></i>
-                    <p class="mt-4 text-lg text-gray-300">Running Bayesian Optimization...</p>
-                    <p class="text-sm text-gray-500">This may take a minute. The system is exploring the reaction space to find the highest yield.</p>
+            <!-- STATE 1: SETUP (Visible by default when opened) -->
+            <div id="optimization-setup-state" class="p-6 flex-grow overflow-y-auto">
+                <h4 class="font-bold text-blue-400 mb-4">Step 1: Provide Prior Knowledge (Optional)</h4>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Column 1: Constraints -->
+                    <div class="bg-gray-700 p-4 rounded-lg">
+                        <h5 class="font-semibold mb-3 text-gray-200">Constrain Search Space</h5>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">Allowed Solvents (comma-separated)</label>
+                                <input type="text" id="prior-solvents" class="molecule-input w-full" placeholder="e.g., C1CCOC1, CC(C)=O">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">Allowed Reagents (comma-separated)</label>
+                                <input type="text" id="prior-reagents" class="molecule-input w-full" placeholder="e.g., CCN(CC)CC, None">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">Allowed Catalysts (comma-separated)</label>
+                                <input type="text" id="prior-catalysts" class="molecule-input w-full" placeholder="e.g., [Pd], None">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">Temperature Range (°C)</label>
+                                <div class="flex space-x-2">
+                                    <input type="number" id="prior-temp-min" class="molecule-input w-full" placeholder="Min">
+                                    <input type="number" id="prior-temp-max" class="molecule-input w-full" placeholder="Max">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Column 2: Data Points -->
+                    <div class="bg-gray-700 p-4 rounded-lg flex flex-col">
+                        <h5 class="font-semibold mb-3 text-gray-200">Add Known Experimental Data Points</h5>
+                        <div id="prior-data-points-container" class="space-y-2 flex-grow overflow-y-auto pr-2">
+                            <!-- Data point rows will be injected here -->
+                        </div>
+                        <button id="add-data-point-btn" class="mt-4 text-sm bg-gray-600 hover:bg-gray-500 text-white font-medium py-2 px-4 rounded-lg w-full">
+                            <i class="fas fa-plus mr-2"></i> Add Data Point
+                        </button>
+                    </div>
                 </div>
+                <div class="mt-6 text-center">
+                    <button id="start-optimization-btn" class="gradient-bg-blue text-white font-bold py-3 px-12 rounded-lg hover:shadow-lg text-lg">
+                        Start Optimization
+                    </button>
+                </div>
+            </div>
 
-                <!-- Results State -->
-                <div id="optimization-results-state" class="hidden">
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- STATE 2: LOADING -->
+            <div id="optimization-loading-state" class="hidden flex-grow flex items-center justify-center text-center p-6">
+                <i class="fas fa-atom fa-spin text-blue-400 text-4xl"></i>
+                <p class="mt-4 text-lg text-gray-300">Running Bayesian Optimization...</p>
+                <!-- <p class="text-sm text-gray-500">This may take a minute. The system is exploring the reaction space to find the highest yield.</p> -->
+            </div>
+
+            <!-- STATE 3: RESULTS -->
+            <div id="optimization-results-state" class="hidden flex-grow flex flex-col p-6 overflow-y-hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Chart -->
                         <div>
                             <h4 class="font-semibold mb-2 text-gray-200">Optimization Progress (Yield vs. Iteration)</h4>

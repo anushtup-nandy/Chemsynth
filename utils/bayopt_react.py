@@ -571,7 +571,8 @@ def run_true_bayesian_optimization(
     num_random_init: int = 5,
     use_adaptive_strategy: bool = True,
     initial_batch_size: int = 2,
-    use_rxn_insight: bool = True  # New parameter to enable/disable rxn-insight
+    use_rxn_insight: bool = True,
+    prior_knowledge: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Enhanced Bayesian optimization with rxn-insight integration for expanded condition space.
@@ -585,6 +586,11 @@ def run_true_bayesian_optimization(
     oracle = initialize_oracle()
     if oracle is None:
         return {"error": "Could not initialize the simulation oracle"}
+    
+    constraint_temp_range = None
+    constraint_solvents = None
+    constraint_reagents = None
+    constraint_catalysts = None
 
     # ENHANCED Generate Search Space with rxn-insight integration
     try:
@@ -693,6 +699,23 @@ def run_true_bayesian_optimization(
             solvents = sorted([s for s in solvents if s and len(s) < 50])[:25]   
             reagents = sorted([r for r in reagents if r and len(r) < 50])[:30]  
             catalysts = sorted([c for c in catalysts if c and len(c) < 50])[:25]
+
+        if prior_knowledge and 'constraints' in prior_knowledge:
+            constraints = prior_knowledge['constraints']
+            logger.info("Applying user-defined search space constraints.")
+            
+            if 'solvents' in constraints and constraints['solvents']:
+                solvents = constraints['solvents']
+                logger.info(f"Overriding solvents with: {solvents}")
+            if 'reagents' in constraints and constraints['reagents']:
+                reagents = constraints['reagents']
+                logger.info(f"Overriding reagents with: {reagents}")
+            if 'catalysts' in constraints and constraints['catalysts']:
+                catalysts = constraints['catalysts']
+                logger.info(f"Overriding catalysts with: {catalysts}")
+            if 'temperature_range' in constraints and len(constraints['temperature_range']) == 2:
+                temp_min, temp_max = constraints['temperature_range']
+                logger.info(f"Overriding temperature range with: {temp_min}°C to {temp_max}°C")
         
         # Add "None" options for optional components
         if "None" not in reagents:
@@ -866,6 +889,41 @@ def run_true_bayesian_optimization(
             logger.info(f"Transferred {len(random_campaign.measurements)} random samples")
     except Exception as e:
         logger.warning(f"Failed to transfer measurements: {e}")
+
+    if prior_knowledge and 'data_points' in prior_knowledge and prior_knowledge['data_points']:
+        logger.info(f"Adding {len(prior_knowledge['data_points'])} prior data points to the campaign.")
+        try:
+            prior_data_list = []
+            for point in prior_knowledge['data_points']:
+                row = point['conditions'].copy()
+                row['Yield'] = point['yield']
+                prior_data_list.append(row)
+            
+            # Ensure all required columns are present, filling with 'None' if necessary
+            for param in searchspace.continuous.keys():
+                for row in prior_data_list:
+                    row.setdefault(param, np.nan)
+            for param in searchspace.categorical.keys():
+                 for row in prior_data_list:
+                    row.setdefault(param, "None") # A reasonable default
+
+            prior_df = pd.DataFrame(prior_data_list)
+            
+            # Add these known data points to the campaign
+            bayesian_campaign.add_measurements(prior_df)
+            logger.info("Successfully added prior data points.")
+            
+            # Also add to history for tracking
+            for i, row in prior_df.iterrows():
+                optimization_history.append({
+                    "iteration": 0, "batch_index": i, "phase": "prior_knowledge",
+                    "conditions": {k: v for k, v in row.items() if k != 'Yield'},
+                    "yield": row['Yield']
+                })
+                current_best_yield = max(current_best_yield, row['Yield'])
+
+        except Exception as e:
+            logger.error(f"Failed to add prior data points: {e}", exc_info=True)
     
     # Adaptive Bayesian optimization phase
     for i in range(num_random_init, num_iterations):

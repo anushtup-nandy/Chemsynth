@@ -10,7 +10,6 @@ from utils.prompt_loader import format_prompt
 from utils.reaction_utils import generate_reaction_image
 from utils.yield_optimizer import AdvancedYieldPredictor
 from transformers.models.llama.modeling_llama import LlamaAttention
-from utils.bayopt_react import run_true_bayesian_optimization, merge_reaction_with_conditions
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
