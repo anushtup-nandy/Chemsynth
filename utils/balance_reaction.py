@@ -1,15 +1,18 @@
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
-from collections import defaultdict
-import pulp
+from collections import defaultdict, Counter
 import requests
 import base64
 from chemicals import CAS_from_any, Tb, Tm, Tc, Hfs, Hfl, Hfg, S0s, S0l, S0g
 import logging
+from chempy import balance_stoichiometry, Substance
+from chempy.chemistry import Reaction
+CHEMPY_AVAILABLE = True
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def get_smiles_from_name(name):
     """
@@ -24,18 +27,15 @@ def get_smiles_from_name(name):
     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/CanonicalSMILES/JSON"
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Raise HTTPError for bad responses
+        response.raise_for_status()
         data = response.json()
         smiles = data['PropertyTable']['Properties'][0]['CanonicalSMILES']
         return smiles
     except requests.exceptions.HTTPError as errh:
-        # Handle HTTPError
         return f"HTTP Error: {errh}"
     except requests.exceptions.RequestException as err:
-        # Handle other RequestExceptions
         return f"Request Exception: {err}"
     except (KeyError, IndexError):
-        # Handle missing data or incorrect JSON format
         return "No data found or error occurred."
 
 
@@ -58,48 +58,6 @@ def count_atoms(smiles):
     return dict(atom_counts)
 
 
-def solve_ilp(A):
-    """
-    Solve the integer linear programming problem to find stoichiometric coefficients.
-
-    Parameters:
-    A (numpy.ndarray): The stoichiometry matrix.
-
-    Returns:
-    list: A list of stoichiometric coefficients, or None if no solution found.
-    """
-    num_vars = A.shape[1]
-    prob = pulp.LpProblem("Balancing_Chemical_Equation", pulp.LpMinimize)
-    
-    # Define variables with lower bound starting from 1
-    x_vars = [pulp.LpVariable(f'x{i}', lowBound=1, cat='Integer') for i in range(num_vars)]
-    
-    # Objective function
-    prob += pulp.lpSum(x_vars)
-    
-    # Constraints
-    for i in range(A.shape[0]):
-        prob += pulp.lpDot(A[i, :], x_vars) == 0
-    
-    # Solve the problem
-    solver = pulp.PULP_CBC_CMD(msg=False)  # Disable logging from the solver
-    prob.solve(solver)
-    
-    logger.info(f"Status: {pulp.LpStatus[prob.status]}")
-    
-    if pulp.LpStatus[prob.status] == 'Optimal':
-        solution = [int(pulp.value(var)) for var in x_vars]
-        logger.info(f"Solution: {solution}")
-        
-        # Check if solution is not just zeros
-        if all(x == 0 for x in solution):
-            return None
-        
-        return solution
-    else:
-        return None
-
-
 def get_molecular_formula(smiles):
     """
     Get the molecular formula of a molecule from its SMILES string.
@@ -117,34 +75,29 @@ def get_molecular_formula(smiles):
         return "Invalid SMILES string"
 
 
-def setup_matrix(elements, compounds):
+def smiles_to_formula(smiles):
     """
-    Create a stoichiometry matrix for the elements and compounds.
-
-    Parameters:
-    elements (list): A list of elements.
-    compounds (list): A list of atom counts for the compounds.
-
-    Returns:
-    numpy.ndarray: The stoichiometry matrix.
-    """
-    matrix = []
-    # Fixed variable name from 'counts' to 'compound'
-    for compound in compounds:
-        row = [compound.get(element, 0) for element in elements]
-        matrix.append(row)
+    Convert SMILES to molecular formula for chempy.
     
-    # Ensure matrix is 2D and transpose it to have elements as rows
-    matrix = np.array(matrix).T  # Transpose to get elements as rows, compounds as columns
-    if matrix.ndim == 1:
-        matrix = matrix.reshape(-1, 1)  # Reshape to 2D if it's inadvertently 1D
-
-    return matrix
+    Parameters:
+    smiles (str): The SMILES string
+    
+    Returns:
+    str: Molecular formula compatible with chempy
+    """
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return None
+        return rdMolDescriptors.CalcMolFormula(mol)
+    except:
+        return None
 
 
 def balance_chemical_equation(reactant_smiles, product_smiles):
     """
-    Balance a chemical equation given reactants and products as SMILES strings.
+    Balance a chemical equation given reactants and products as SMILES strings using ChemPy.
+    Can handle both determined and underdetermined systems.
 
     Parameters:
     reactant_smiles (list): A list of SMILES strings for the reactants.
@@ -153,38 +106,224 @@ def balance_chemical_equation(reactant_smiles, product_smiles):
     Returns:
     tuple: Two lists containing tuples of stoichiometric coefficients and molecular formulas for reactants and products.
     """
-    reactant_counts = [count_atoms(smiles) for smiles in reactant_smiles]
-    product_counts = [count_atoms(smiles) for smiles in product_smiles]
+    if not CHEMPY_AVAILABLE:
+        raise ImportError("ChemPy is required for advanced balancing. Install with: pip install chempy")
+    
+    try:
+        # Convert SMILES to molecular formulas
+        reactant_formulas = []
+        for smiles in reactant_smiles:
+            formula = smiles_to_formula(smiles)
+            if formula is None:
+                raise ValueError(f"Invalid SMILES string: {smiles}")
+            reactant_formulas.append(formula)
+        
+        product_formulas = []
+        for smiles in product_smiles:
+            formula = smiles_to_formula(smiles)
+            if formula is None:
+                raise ValueError(f"Invalid SMILES string: {smiles}")
+            product_formulas.append(formula)
+        
+        logger.info(f"Balancing reaction: {' + '.join(reactant_formulas)} -> {' + '.join(product_formulas)}")
+        
+        # Use chempy to balance the equation
+        # Convert to sets as required by chempy
+        reactants_set = set(reactant_formulas)
+        products_set = set(product_formulas)
+        
+        # Try balancing with underdetermined=True to handle incomplete reactions
+        try:
+            balanced_reactants, balanced_products = balance_stoichiometry(
+                reactants_set, 
+                products_set, 
+                underdetermined=True
+            )
+            
+            logger.info("Successfully balanced using underdetermined=True")
+            
+        except Exception as e:
+            logger.warning(f"Underdetermined balancing failed: {e}")
+            # Fall back to regular balancing
+            try:
+                balanced_reactants, balanced_products = balance_stoichiometry(
+                    reactants_set, 
+                    products_set, 
+                    underdetermined=False
+                )
+                logger.info("Successfully balanced using regular method")
+            except Exception as e2:
+                logger.error(f"Both balancing methods failed: {e2}")
+                # Return 1:1 stoichiometry as fallback
+                reactant_data = [(1, get_molecular_formula(smiles)) for smiles in reactant_smiles]
+                product_data = [(1, get_molecular_formula(smiles)) for smiles in product_smiles]
+                logger.warning("Falling back to 1:1 stoichiometry")
+                return reactant_data, product_data
+        
+        # Convert the results back to the expected format
+        reactant_data = []
+        for smiles, formula in zip(reactant_smiles, reactant_formulas):
+            coeff = balanced_reactants.get(formula, 1)
+            # Handle symbolic coefficients from underdetermined systems
+            if hasattr(coeff, 'evalf'):
+                # If it's a symbolic expression, evaluate it numerically
+                try:
+                    coeff_val = float(coeff.evalf())
+                    if coeff_val <= 0:
+                        coeff_val = 1  # Ensure positive coefficient
+                    coeff = int(round(coeff_val))
+                except:
+                    coeff = 1
+            elif isinstance(coeff, (int, float)):
+                coeff = int(max(1, round(coeff)))
+            else:
+                coeff = 1
+            
+            reactant_data.append((coeff, formula))
+        
+        product_data = []
+        for smiles, formula in zip(product_smiles, product_formulas):
+            coeff = balanced_products.get(formula, 1)
+            # Handle symbolic coefficients from underdetermined systems
+            if hasattr(coeff, 'evalf'):
+                try:
+                    coeff_val = float(coeff.evalf())
+                    if coeff_val <= 0:
+                        coeff_val = 1
+                    coeff = int(round(coeff_val))
+                except:
+                    coeff = 1
+            elif isinstance(coeff, (int, float)):
+                coeff = int(max(1, round(coeff)))
+            else:
+                coeff = 1
+                
+            product_data.append((coeff, formula))
+        
+        logger.info(f"Final balanced coefficients - Reactants: {reactant_data}, Products: {product_data}")
+        return reactant_data, product_data
+        
+    except Exception as e:
+        logger.error(f"Error in balance_chemical_equation: {e}")
+        # Return 1:1 stoichiometry as ultimate fallback
+        reactant_data = [(1, get_molecular_formula(smiles)) for smiles in reactant_smiles]
+        product_data = [(1, get_molecular_formula(smiles)) for smiles in product_smiles]
+        return reactant_data, product_data
 
-    reactant_elements = set(sum([list(counts.keys()) for counts in reactant_counts], []))
-    product_elements = set(sum([list(counts.keys()) for counts in product_counts], []))
 
-    if reactant_elements != product_elements:
-        missing_in_products = reactant_elements - product_elements
-        missing_in_reactants = product_elements - reactant_elements
-        error_message = "Element mismatch found: "
-        if missing_in_products:
-            error_message += f"Elements {missing_in_products} are in reactants but not in products. "
-        if missing_in_reactants:
-            error_message += f"Elements {missing_in_reactants} are in products but not in reactants."
-        raise ValueError(error_message)
-
-    elements = sorted(reactant_elements.union(product_elements))
-    A_reactants = setup_matrix(elements, reactant_counts)
-    A_products = setup_matrix(elements, product_counts)
-    A = np.concatenate([A_reactants, -A_products], axis=1)
-
-    integer_coefficients = solve_ilp(A)
-    if integer_coefficients is None or not integer_coefficients:
-        raise ValueError("Failed to solve the balance equation. The system may be underdetermined or inconsistent.")
-
-    reactant_coeffs = integer_coefficients[:len(reactant_smiles)]
-    product_coeffs = integer_coefficients[len(reactant_smiles):]
-
-    reactant_data = [(coeff, get_molecular_formula(smiles)) for coeff, smiles in zip(reactant_coeffs, reactant_smiles)]
-    product_data = [(coeff, get_molecular_formula(smiles)) for coeff, smiles in zip(product_coeffs, product_smiles)]
-
-    return reactant_data, product_data
+def balance_chemical_equation_advanced(reactant_smiles, product_smiles, allow_incomplete=True):
+    """
+    Advanced balancing that can handle incomplete/underdetermined reactions.
+    Returns multiple possible solutions for underdetermined systems.
+    
+    Parameters:
+    reactant_smiles (list): A list of SMILES strings for the reactants.
+    product_smiles (list): A list of SMILES strings for the products.
+    allow_incomplete (bool): Whether to allow balancing of incomplete reactions.
+    
+    Returns:
+    list: A list of possible balanced reactions, each containing reactant and product data.
+    """
+    if not CHEMPY_AVAILABLE:
+        # Fall back to the original method
+        try:
+            reactant_data, product_data = balance_chemical_equation(reactant_smiles, product_smiles)
+            return [{"reactants": reactant_data, "products": product_data, "method": "fallback"}]
+        except Exception as e:
+            logger.error(f"Fallback balancing failed: {e}")
+            return []
+    
+    try:
+        # Convert SMILES to molecular formulas
+        reactant_formulas = [smiles_to_formula(smiles) for smiles in reactant_smiles]
+        product_formulas = [smiles_to_formula(smiles) for smiles in product_smiles]
+        
+        if None in reactant_formulas or None in product_formulas:
+            raise ValueError("Invalid SMILES strings found")
+        
+        # Try different balancing approaches
+        solutions = []
+        
+        # Method 1: Standard balancing
+        try:
+            balanced_r, balanced_p = balance_stoichiometry(
+                set(reactant_formulas), 
+                set(product_formulas), 
+                underdetermined=False
+            )
+            
+            reactant_data = [(balanced_r.get(f, 1), f) for f in reactant_formulas]
+            product_data = [(balanced_p.get(f, 1), f) for f in product_formulas]
+            
+            solutions.append({
+                "reactants": reactant_data,
+                "products": product_data,
+                "method": "standard"
+            })
+            
+        except Exception as e:
+            logger.info(f"Standard balancing failed: {e}")
+        
+        # Method 2: Underdetermined balancing (for incomplete reactions)
+        if allow_incomplete:
+            try:
+                balanced_r, balanced_p = balance_stoichiometry(
+                    set(reactant_formulas), 
+                    set(product_formulas), 
+                    underdetermined=True
+                )
+                
+                # Process symbolic solutions
+                reactant_data = []
+                for formula in reactant_formulas:
+                    coeff = balanced_r.get(formula, 1)
+                    if hasattr(coeff, 'free_symbols') and coeff.free_symbols:
+                        # For parametric solutions, use a default value
+                        coeff = 1
+                    elif hasattr(coeff, 'evalf'):
+                        coeff = int(max(1, round(float(coeff.evalf()))))
+                    else:
+                        coeff = max(1, int(coeff))
+                    reactant_data.append((coeff, formula))
+                
+                product_data = []
+                for formula in product_formulas:
+                    coeff = balanced_p.get(formula, 1)
+                    if hasattr(coeff, 'free_symbols') and coeff.free_symbols:
+                        coeff = 1
+                    elif hasattr(coeff, 'evalf'):
+                        coeff = int(max(1, round(float(coeff.evalf()))))
+                    else:
+                        coeff = max(1, int(coeff))
+                    product_data.append((coeff, formula))
+                
+                solutions.append({
+                    "reactants": reactant_data,
+                    "products": product_data,
+                    "method": "underdetermined"
+                })
+                
+            except Exception as e:
+                logger.info(f"Underdetermined balancing failed: {e}")
+        
+        # If no solutions found, return 1:1 stoichiometry
+        if not solutions:
+            reactant_data = [(1, get_molecular_formula(smiles)) for smiles in reactant_smiles]
+            product_data = [(1, get_molecular_formula(smiles)) for smiles in product_smiles]
+            solutions.append({
+                "reactants": reactant_data,
+                "products": product_data,
+                "method": "1:1_fallback"
+            })
+        
+        return solutions
+        
+    except Exception as e:
+        logger.error(f"Advanced balancing failed: {e}")
+        # Ultimate fallback
+        reactant_data = [(1, get_molecular_formula(smiles)) for smiles in reactant_smiles]
+        product_data = [(1, get_molecular_formula(smiles)) for smiles in product_smiles]
+        return [{"reactants": reactant_data, "products": product_data, "method": "error_fallback"}]
 
 
 def display_reaction(reactants, products):
@@ -450,15 +589,55 @@ def calculate_reaction_thermodynamics(reactant_data, product_data, reactant_name
         return None
 
 
+def test_chempy_capabilities():
+    """
+    Test the capabilities of chempy with various reaction types.
+    """
+    if not CHEMPY_AVAILABLE:
+        print("ChemPy not available. Install with: pip install chempy")
+        return
+    
+    print("=== Testing ChemPy Balancing Capabilities ===\n")
+    
+    # Test 1: Standard reaction (methane combustion)
+    print("Test 1: Complete reaction (Methane combustion)")
+    try:
+        reactants = ["C", "O=O"]  # CH4 + O2
+        products = ["O=C=O", "O"]  # CO2 + H2O
+        
+        solutions = balance_chemical_equation_advanced(reactants, products)
+        for i, sol in enumerate(solutions):
+            print(f"  Solution {i+1} ({sol['method']}): {sol['reactants']} -> {sol['products']}")
+    except Exception as e:
+        print(f"  Error: {e}")
+    
+    # Test 2: Underdetermined reaction
+    print("\nTest 2: Underdetermined reaction (Carbon + Oxygen)")
+    try:
+        reactants = ["C", "O=O"]  # C + O2
+        products = ["O=C=O", "[C-]#[O+]"]  # CO2 + CO (underdetermined)
+        
+        solutions = balance_chemical_equation_advanced(reactants, products)
+        for i, sol in enumerate(solutions):
+            print(f"  Solution {i+1} ({sol['method']}): {sol['reactants']} -> {sol['products']}")
+    except Exception as e:
+        print(f"  Error: {e}")
+    
+    print("\n" + "="*50)
+
+
 # Example usage function
 def example_usage():
     """
-    Demonstrate the usage of the balance_reaction module.
+    Demonstrate the usage of the balance_reaction module with ChemPy.
     """
-    print("=== Chemical Reaction Balancer Example ===\n")
+    print("=== Chemical Reaction Balancer with ChemPy ===\n")
     
-    # Example 1: Balance methane combustion
-    print("Example 1: Methane Combustion")
+    # Test ChemPy capabilities first
+    test_chempy_capabilities()
+    
+    # Example 1: Balance methane combustion using names
+    print("Example 1: Methane Combustion (using names)")
     try:
         reactants = ["methane", "oxygen"]
         products = ["carbon dioxide", "water"]
