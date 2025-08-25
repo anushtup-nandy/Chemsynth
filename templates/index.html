@@ -253,14 +253,26 @@
                                 <label class="block text-sm text-gray-300 mb-1">Allowed Solvents (comma-separated)</label>
                                 <input type="text" id="prior-solvents" class="molecule-input w-full" placeholder="e.g., C1CCOC1, CC(C)=O">
                             </div>
+                            <!-- Reagents -->
                             <div>
-                                <label class="block text-sm text-gray-300 mb-1">Allowed Reagents (comma-separated)</label>
-                                <input type="text" id="prior-reagents" class="molecule-input w-full" placeholder="e.g., CCN(CC)CC, None">
+                                <label class="block text-sm text-gray-300 mb-2">Reagents to Optimize</label>
+                                <div id="prior-reagents-container" class="space-y-2">
+                                    <!-- JS will populate this -->
+                                </div>
+                                <button id="add-prior-reagent-btn" class="text-xs text-blue-400 hover:text-blue-300 mt-2">
+                                    <i class="fas fa-plus mr-1"></i> Add Reagent
+                                </button>
                             </div>
+                            <!-- Catalysts -->
                             <div>
-                                <label class="block text-sm text-gray-300 mb-1">Allowed Catalysts (comma-separated)</label>
-                                <input type="text" id="prior-catalysts" class="molecule-input w-full" placeholder="e.g., [Pd], None">
-                            </div>
+                                <label class="block text-sm text-gray-300 mb-2">Catalysts to Optimize</label>
+                                <div id="prior-catalysts-container" class="space-y-2">
+                                    <!-- JS will populate this -->
+                                </div>
+                                <button id="add-prior-catalyst-btn" class="text-xs text-blue-400 hover:text-blue-300 mt-2">
+                                    <i class="fas fa-plus mr-1"></i> Add Catalyst
+                                </button>
+</div>
                             <div>
                                 <label class="block text-sm text-gray-300 mb-1">Temperature Range (°C)</label>
                                 <div class="flex space-x-2">
@@ -269,21 +281,7 @@
                                 </div>
                             </div>
                             <div id="dynamic-reactant-constraints-container" class="space-y-4">
-                                <!-- Reactant equivalent constraints will be dynamically inserted here by script.js -->
-                            </div>
-                            <div>
-                                <label class="block text-sm text-gray-300 mb-1">Reagent Equivalents</label>
-                                <div class="flex space-x-2">
-                                    <input type="number" id="prior-reagent-eq-min" class="molecule-input w-full" placeholder="Min (e.g., 0.8)">
-                                    <input type="number" id="prior-reagent-eq-max" class="molecule-input w-full" placeholder="Max (e.g., 5.0)">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm text-gray-300 mb-1">Catalyst Loading (mol %)</label>
-                                <div class="flex space-x-2">
-                                    <input type="number" id="prior-catalyst-mol-min" class="molecule-input w-full" placeholder="Min (e.g., 0.1)">
-                                    <input type="number" id="prior-catalyst-mol-max" class="molecule-input w-full" placeholder="Max (e.g., 10.0)">
-                                </div>
+                                <!-- JS will populate this section for reactions with >1 reactant -->
                             </div>
                         </div>
                     </div>

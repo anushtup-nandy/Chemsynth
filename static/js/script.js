@@ -49,6 +49,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const addDataPointBtn = document.getElementById('add-data-point-btn');
     const dataPointsContainer = document.getElementById('prior-data-points-container');
 
+    document.getElementById('add-prior-reagent-btn').addEventListener('click', addPriorReagentRow);
+    document.getElementById('add-prior-catalyst-btn').addEventListener('click', addPriorCatalystRow);
+
     let currentOptimizationSmiles = '';
 
     // --- Initial State Setup ---
@@ -1269,26 +1272,6 @@ document.addEventListener('DOMContentLoaded', function() {
      * Handles the click on an "Optimize" button for a reaction step.
      * @param {string} nakedSmiles The naked reaction SMILES to optimize.
      */
-    // function handleOptimizeStep(nakedSmiles) {
-    //     console.log("Setting up optimization for:", nakedSmiles);
-    //     currentOptimizationSmiles = nakedSmiles;
-
-    //     optimizationModal.classList.remove('hidden');
-    //     setupState.classList.remove('hidden');
-    //     loadingState.classList.add('hidden');
-    //     resultsState.classList.add('hidden');
-        
-    //     // Reset the UI
-    //     dataPointsContainer.innerHTML = '';
-    //     document.getElementById('prior-solvents').value = '';
-    //     document.getElementById('prior-reagents').value = '';
-    //     document.getElementById('prior-catalysts').value = '';
-    //     document.getElementById('prior-temp-min').value = '';
-    //     document.getElementById('prior-temp-max').value = '';
-    //     if (optimizationChartInstance) {
-    //         optimizationChartInstance.destroy();
-    //     }
-    // }
     function handleOptimizeStep(nakedSmiles) {
         console.log("Setting up optimization for:", nakedSmiles);
         currentOptimizationSmiles = nakedSmiles;
@@ -1332,10 +1315,14 @@ document.addEventListener('DOMContentLoaded', function() {
         // Reset the UI
         dataPointsContainer.innerHTML = '';
         document.getElementById('prior-solvents').value = '';
-        document.getElementById('prior-reagents').value = '';
-        document.getElementById('prior-catalysts').value = '';
+        document.getElementById('prior-reagents-container').innerHTML = ''; 
+        document.getElementById('prior-catalysts-container').innerHTML = '';
         document.getElementById('prior-temp-min').value = '';
         document.getElementById('prior-temp-max').value = '';
+        
+        // Add an empty row to start with
+        addPriorReagentRow();
+        addPriorCatalystRow();
         if (optimizationChartInstance) {
             optimizationChartInstance.destroy();
         }
@@ -1374,6 +1361,36 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /**
+     * Adds a new row to the UI for specifying a reagent with its equivalent range.
+     */
+    function addPriorReagentRow() {
+        const container = document.getElementById('prior-reagents-container');
+        const newRow = document.createElement('div');
+        newRow.className = 'prior-reagent-row grid grid-cols-3 gap-2 items-center';
+        newRow.innerHTML = `
+            <input type="text" class="molecule-input col-span-1" placeholder="Reagent SMILES">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Min Eq.">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Max Eq.">
+        `;
+        container.appendChild(newRow);
+    }
+
+    /**
+     * Adds a new row to the UI for specifying a catalyst with its mol% range.
+     */
+    function addPriorCatalystRow() {
+        const container = document.getElementById('prior-catalysts-container');
+        const newRow = document.createElement('div');
+        newRow.className = 'prior-catalyst-row grid grid-cols-3 gap-2 items-center';
+        newRow.innerHTML = `
+            <input type="text" class="molecule-input col-span-1" placeholder="Catalyst SMILES">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Min Mol %">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Max Mol %">
+        `;
+        container.appendChild(newRow);
+    }
+
+    /**
      * Gathers prior knowledge from the UI, constructs the payload, and calls the API.
      */
     async function startOptimizationWithPriors() {
@@ -1391,28 +1408,34 @@ document.addEventListener('DOMContentLoaded', function() {
         const solvents = document.getElementById('prior-solvents').value.trim();
         if (solvents) constraints.solvents = solvents.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
 
-        const reagents = document.getElementById('prior-reagents').value.trim();
-        if (reagents) constraints.reagents = reagents.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-
-        const catalysts = document.getElementById('prior-catalysts').value.trim();
-        if (catalysts) constraints.catalysts = catalysts.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+        const reagents = [];
+        document.querySelectorAll('.prior-reagent-row').forEach(row => {
+            const inputs = row.querySelectorAll('input');
+            const smiles = inputs[0].value.trim();
+            const minEq = parseFloat(inputs[1].value);
+            const maxEq = parseFloat(inputs[2].value);
+            if (smiles && !isNaN(minEq) && !isNaN(maxEq)) {
+                reagents.push({ smiles: smiles, eq_range: [minEq, maxEq] });
+            }
+        });
+        if (reagents.length > 0) constraints.reagents = reagents;
+        
+        const catalysts = [];
+        document.querySelectorAll('.prior-catalyst-row').forEach(row => {
+            const inputs = row.querySelectorAll('input');
+            const smiles = inputs[0].value.trim();
+            const minMol = parseFloat(inputs[1].value);
+            const maxMol = parseFloat(inputs[2].value);
+            if (smiles && !isNaN(minMol) && !isNaN(maxMol)) {
+                catalysts.push({ smiles: smiles, mol_percent_range: [minMol, maxMol] });
+            }
+        });
+        if (catalysts.length > 0) constraints.catalysts = catalysts;
 
         const tempMin = parseFloat(document.getElementById('prior-temp-min').value);
         const tempMax = parseFloat(document.getElementById('prior-temp-max').value);
         if (!isNaN(tempMin) && !isNaN(tempMax)) {
             constraints.temperature_range = [tempMin, tempMax];
-        }
-        
-        const reagentEqMin = parseFloat(document.getElementById('prior-reagent-eq-min').value);
-        const reagentEqMax = parseFloat(document.getElementById('prior-reagent-eq-max').value);
-        if (!isNaN(reagentEqMin) && !isNaN(reagentEqMax)) {
-            constraints.reagent_eq_range = [reagentEqMin, reagentEqMax];
-        }
-
-        const catalystMolMin = parseFloat(document.getElementById('prior-catalyst-mol-min').value);
-        const catalystMolMax = parseFloat(document.getElementById('prior-catalyst-mol-max').value);
-        if (!isNaN(catalystMolMin) && !isNaN(catalystMolMax)) {
-            constraints.catalyst_mol_percent_range = [catalystMolMin, catalystMolMax];
         }
 
         const reactants = currentOptimizationSmiles.split('>>')[0].split('.');

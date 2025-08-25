@@ -847,14 +847,51 @@ def run_true_bayesian_optimization(
     try:
         parameters = []
         
+        if (user_constraints.get('reagents') and 
+            isinstance(user_constraints['reagents'], list) and 
+            all(isinstance(r, dict) and 'smiles' in r and 'eq_range' in r for r in user_constraints['reagents'])):
+            
+            logger.info("Detected structured reagent constraints. Creating numerical parameters.")
+            for reagent_info in user_constraints['reagents']:
+                reagent_smiles = reagent_info['smiles']
+                # Sanitize SMILES for valid parameter name
+                sanitized_smiles = "".join(c for c in reagent_smiles if c.isalnum())
+                param_name = f"Reagent_{sanitized_smiles}_Equivalents"
+                bounds = tuple(reagent_info['eq_range'])
+                parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
+                logger.info(f"Added numerical parameter for Reagent '{reagent_smiles}' with bounds {bounds}")
+        else:
+            # Fallback to original categorical logic
+            if len(final_reagents) > 1:
+                parameters.append(CategoricalParameter(name="Reagent", values=final_reagents, encoding="OHE"))
+            reagent_eq_bounds = user_constraints['reagent_eq_range'] or (0.8, 5.0)
+            parameters.append(NumericalContinuousParameter(name="Reagent_Equivalents", bounds=reagent_eq_bounds))
+            
+        # Check for the new structured format for catalysts
+        # Expected format: constraints['catalysts'] = [{'smiles': '...', 'mol_percent_range': [min, max]}, ...]
+        if (user_constraints.get('catalysts') and 
+            isinstance(user_constraints['catalysts'], list) and 
+            all(isinstance(c, dict) and 'smiles' in c and 'mol_percent_range' in c for c in user_constraints['catalysts'])):
+
+            logger.info("Detected structured catalyst constraints. Creating numerical parameters.")
+            for catalyst_info in user_constraints['catalysts']:
+                catalyst_smiles = catalyst_info['smiles']
+                sanitized_smiles = "".join(c for c in catalyst_smiles if c.isalnum())
+                param_name = f"Catalyst_{sanitized_smiles}_mol_percent"
+                bounds = tuple(catalyst_info['mol_percent_range'])
+                parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
+                logger.info(f"Added numerical parameter for Catalyst '{catalyst_smiles}' with bounds {bounds}")
+        else:
+            # Fallback to original categorical logic
+            if len(final_catalysts) > 1:
+                parameters.append(CategoricalParameter(name="Catalyst", values=final_catalysts, encoding="OHE"))
+            catalyst_mol_percent_bounds = user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
+            parameters.append(NumericalContinuousParameter(name="Catalyst_mol_percent", bounds=catalyst_mol_percent_bounds))
+
+        # Unmodified parameters
         if len(final_solvents) > 1:
             parameters.append(CategoricalParameter(name="Solvent", values=final_solvents, encoding="OHE"))
-        if len(final_reagents) > 1:
-            parameters.append(CategoricalParameter(name="Reagent", values=final_reagents, encoding="OHE"))
-        if len(final_catalysts) > 1:
-            parameters.append(CategoricalParameter(name="Catalyst", values=final_catalysts, encoding="OHE"))
             
-        # Temperature parameter with preserved constraints
         parameters.append(NumericalContinuousParameter(
             name="Temperature",
             bounds=(temp_min, temp_max)
@@ -868,12 +905,6 @@ def run_true_bayesian_optimization(
                 parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
                 logger.info(f"Added dynamic parameter: {param_name} with bounds {bounds}")
 
-        # Reagent and Catalyst parameters with robust default bounds
-        reagent_eq_bounds = user_constraints['reagent_eq_range'] or (0.8, 5.0)
-        parameters.append(NumericalContinuousParameter(name="Reagent_Equivalents", bounds=reagent_eq_bounds))
-        
-        catalyst_mol_percent_bounds = user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
-        parameters.append(NumericalContinuousParameter(name="Catalyst_mol_percent", bounds=catalyst_mol_percent_bounds))
 
         searchspace = SearchSpace.from_product(parameters)
         logger.info(f"Created DYNAMIC mixed search space with {len(parameters)} parameters")
@@ -906,20 +937,56 @@ def run_true_bayesian_optimization(
             
             # Evaluate entire batch
             for idx, (_, rec) in enumerate(recommendations.iterrows()):
+                reagent_equivalents = 1.0
+                catalyst_mol_per = 1.0
                 temp = rec['Temperature']
                 solvent = rec.get('Solvent', final_solvents[0])
                 reagent = rec.get('Reagent', final_reagents[0])
-                catalyst = rec.get('Catalyst', final_catalysts[0])
-                reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
-                catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
+                condition_dict = {'solvent': solvent}
+                reagent_parts = []
+                reagent_eq_parts = []
+                catalyst_parts = []
+                catalyst_mol_per_parts = []
                 
-                condition_dict = {
-                    'solvent': solvent,
-                    'reagent': reagent if reagent != "None" else "",
-                    'catalyst': catalyst if catalyst != "None" else "",
-                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
-                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
-                }
+                # Check for structured numerical parameters first
+                for param_name, value in rec.items():
+                    if param_name.startswith('Reagent_') and param_name.endswith('_Equivalents'):
+                        # This logic assumes the original SMILES is recoverable from the param name.
+                        # This is a limitation of this approach but sufficient for many cases.
+                        # A more robust system might store a mapping, but this is a minimal change.
+                        reagent_constraints = user_constraints.get('reagents') or []
+                        original_smiles = next((r['smiles'] for r in reagent_constraints if "".join(c for c in r['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            reagent_parts.append(original_smiles)
+                            reagent_eq_parts.append(str(round(float(value), 3)))
+                    elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
+                        catalyst_constraints = user_constraints.get('catalysts') or []
+                        original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            catalyst_parts.append(original_smiles)
+                            catalyst_mol_per_parts.append(str(round(float(value), 3)))
+
+                # Fallback to categorical if structured params weren't found
+                if not reagent_parts and 'Reagent' in rec:
+                    reagent = rec.get('Reagent', 'None')
+                    reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
+                    if reagent != "None":
+                        condition_dict['reagent'] = reagent
+                        condition_dict['reagent_eq'] = reagent_equivalents
+                elif reagent_parts:
+                    condition_dict['reagent'] = ".".join(reagent_parts)
+                    condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
+
+                if not catalyst_parts and 'Catalyst' in rec:
+                    catalyst = rec.get('Catalyst', 'None')
+                    catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
+                    if catalyst != "None":
+                        condition_dict['catalyst'] = catalyst
+                        condition_dict['catalyst_mol_per'] = catalyst_mol_per
+                elif catalyst_parts:
+                    condition_dict['catalyst'] = ".".join(catalyst_parts)
+                    condition_dict['catalyst_mol_per'] = ",".join(catalyst_mol_per_parts)
+                    
                 if num_reactants > 1:
                     for i in range(1, num_reactants):
                         param_name = f"Reactant_{i+1}_Equivalents"
@@ -1047,32 +1114,59 @@ def run_true_bayesian_optimization(
             
             # Evaluate batch
             for idx, (_, rec) in enumerate(recommendations.iterrows()):
+                reagent_equivalents = 1.0
+                catalyst_mol_per = 1.0
                 temp = rec['Temperature']
                 solvent = rec.get('Solvent', final_solvents[0])
-                reagent = rec.get('Reagent', final_reagents[0])
-                catalyst = rec.get('Catalyst', final_catalysts[0])
-                reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
-                catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
+                condition_dict = {'solvent': solvent}
+                reagent_parts = []
+                reagent_eq_parts = []
+                catalyst_parts = []
+                catalyst_mol_per_parts = []
                 
-                condition_dict = {
-                    'solvent': solvent,
-                    'reagent': reagent if reagent != "None" else "",
-                    'catalyst': catalyst if catalyst != "None" else "",
-                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
-                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
-                }
+                # Check for structured numerical parameters first
+                for param_name, value in rec.items():
+                    if param_name.startswith('Reagent_') and param_name.endswith('_Equivalents'):
+                        # This logic assumes the original SMILES is recoverable from the param name.
+                        # This is a limitation of this approach but sufficient for many cases.
+                        # A more robust system might store a mapping, but this is a minimal change.
+                        reagent_constraints = user_constraints.get('reagents') or []
+                        original_smiles = next((r['smiles'] for r in reagent_constraints if "".join(c for c in r['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            reagent_parts.append(original_smiles)
+                            reagent_eq_parts.append(str(round(float(value), 3)))
+                    elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
+                        catalyst_constraints = user_constraints.get('catalysts') or []
+                        original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            catalyst_parts.append(original_smiles)
+                            catalyst_mol_per_parts.append(str(round(float(value), 3)))
+
+                # Fallback to categorical if structured params weren't found
+                if not reagent_parts and 'Reagent' in rec:
+                    reagent = rec.get('Reagent', 'None')
+                    reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
+                    if reagent != "None":
+                        condition_dict['reagent'] = reagent
+                        condition_dict['reagent_eq'] = reagent_equivalents
+                elif reagent_parts:
+                    condition_dict['reagent'] = ".".join(reagent_parts)
+                    condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
+
+                if not catalyst_parts and 'Catalyst' in rec:
+                    catalyst = rec.get('Catalyst', 'None')
+                    catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
+                    if catalyst != "None":
+                        condition_dict['catalyst'] = catalyst
+                        condition_dict['catalyst_mol_per'] = catalyst_mol_per
+                elif catalyst_parts:
+                    condition_dict['catalyst'] = ".".join(catalyst_parts)
+                    condition_dict['catalyst_mol_per'] = ",".join(catalyst_mol_per_parts)
+                    
                 if num_reactants > 1:
                     for i in range(1, num_reactants):
                         param_name = f"Reactant_{i+1}_Equivalents"
                         condition_dict[param_name] = round(float(rec.get(param_name, 1.0)), 3)
-                
-                condition_dict = {
-                    'solvent': solvent,
-                    'reagent': reagent if reagent != "None" else "",
-                    'catalyst': catalyst if catalyst != "None" else "",
-                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
-                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
-                }
                 
                 full_reaction_smiles = merge_reaction_with_conditions(naked_reaction_smiles, condition_dict)
                 yield_value = safe_predict_yield(oracle, full_reaction_smiles)
