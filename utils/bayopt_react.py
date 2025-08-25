@@ -601,8 +601,13 @@ def run_true_bayesian_optimization(
         'temperature_range': None,
         'solvents': None,
         'reagents': None,
-        'catalysts': None
+        'catalysts': None,
+        'reagent_eq_range': None,
+        'catalyst_mol_percent_range': None,
     }
+
+    reactants_smiles = naked_reaction_smiles.split(">>")[0].split('.')
+    num_reactants = len(reactants_smiles)
     
     if prior_knowledge and 'constraints' in prior_knowledge:
         constraints = prior_knowledge['constraints']
@@ -623,6 +628,21 @@ def run_true_bayesian_optimization(
         if 'catalysts' in constraints and constraints['catalysts']:
             user_constraints['catalysts'] = constraints['catalysts']
             logger.info(f"USER CONSTRAINT: Catalysts = {constraints['catalysts']}")
+
+        if 'reagent_eq_range' in constraints and len(constraints['reagent_eq_range']) == 2:
+            user_constraints['reagent_eq_range'] = constraints['reagent_eq_range']
+            logger.info(f"USER CONSTRAINT: Reagent Equiv. Range = {constraints['reagent_eq_range']}")
+
+        if 'catalyst_mol_percent_range' in constraints and len(constraints['catalyst_mol_percent_range']) == 2:
+            user_constraints['catalyst_mol_percent_range'] = constraints['catalyst_mol_percent_range']
+            logger.info(f"USER CONSTRAINT: Catalyst Mol % Range = {constraints['catalyst_mol_percent_range']}")
+            
+        if num_reactants > 1:
+            for i in range(1, num_reactants):
+                param_key = f"reactant_{i+1}_eq_range"
+                if param_key in constraints and len(constraints[param_key]) == 2:
+                    user_constraints[param_key] = constraints[param_key]
+                    logger.info(f"USER CONSTRAINT: Reactant {i+1} Equiv. = {constraints[param_key]}")
 
     # ENHANCED Generate Search Space with rxn-insight integration
     try:
@@ -707,7 +727,7 @@ def run_true_bayesian_optimization(
         
         # SOLVENTS: User constraints take absolute priority
         if user_constraints['solvents'] is not None:
-            final_solvents = user_constraints['solvents']
+            final_solvents = [s for s in user_constraints['solvents'] if s]
             logger.info(f"USING USER SOLVENT CONSTRAINTS: {len(final_solvents)} solvents")
         else:
             # Apply intelligent filtering based on rxn-insight rankings
@@ -725,7 +745,7 @@ def run_true_bayesian_optimization(
         
         # REAGENTS: User constraints take absolute priority
         if user_constraints['reagents'] is not None:
-            final_reagents = user_constraints['reagents']
+            final_reagents = [r for r in user_constraints['reagents'] if r]
             logger.info(f"USING USER REAGENT CONSTRAINTS: {len(final_reagents)} reagents")
         else:
             if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
@@ -742,7 +762,7 @@ def run_true_bayesian_optimization(
         
         # CATALYSTS: User constraints take absolute priority
         if user_constraints['catalysts'] is not None:
-            final_catalysts = user_constraints['catalysts']
+            final_catalysts = [c for c in user_constraints['catalysts'] if c]
             logger.info(f"USING USER CATALYST CONSTRAINTS: {len(final_catalysts)} catalysts")
         else:
             if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
@@ -840,11 +860,26 @@ def run_true_bayesian_optimization(
             bounds=(temp_min, temp_max)
         ))
 
+        if num_reactants > 1:
+            for i in range(1, num_reactants):
+                param_name = f"Reactant_{i+1}_Equivalents"
+                constraint_key = f"reactant_{i+1}_eq_range"
+                bounds = user_constraints.get(constraint_key) or (0.8, 3.0)
+                parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
+                logger.info(f"Added dynamic parameter: {param_name} with bounds {bounds}")
+
+        # Reagent and Catalyst parameters with robust default bounds
+        reagent_eq_bounds = user_constraints['reagent_eq_range'] or (0.8, 5.0)
+        parameters.append(NumericalContinuousParameter(name="Reagent_Equivalents", bounds=reagent_eq_bounds))
+        
+        catalyst_mol_percent_bounds = user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
+        parameters.append(NumericalContinuousParameter(name="Catalyst_mol_percent", bounds=catalyst_mol_percent_bounds))
+
         searchspace = SearchSpace.from_product(parameters)
-        logger.info(f"Created constrained search space with {len(parameters)} parameters")
+        logger.info(f"Created DYNAMIC mixed search space with {len(parameters)} parameters")
 
     except Exception as e:
-        logger.error(f"Error creating search space: {e}", exc_info=True)
+        logger.error(f"Error creating dynamic search space: {e}", exc_info=True)
         return {"error": f"Failed to create BayBE search space: {e}"}
 
     # ENHANCED Phase 1: Random Exploration with Batch Sampling
@@ -875,18 +910,27 @@ def run_true_bayesian_optimization(
                 solvent = rec.get('Solvent', final_solvents[0])
                 reagent = rec.get('Reagent', final_reagents[0])
                 catalyst = rec.get('Catalyst', final_catalysts[0])
+                reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
+                catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
                 
                 condition_dict = {
                     'solvent': solvent,
                     'reagent': reagent if reagent != "None" else "",
-                    'catalyst': catalyst if catalyst != "None" else ""
+                    'catalyst': catalyst if catalyst != "None" else "",
+                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
+                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
                 }
+                if num_reactants > 1:
+                    for i in range(1, num_reactants):
+                        param_name = f"Reactant_{i+1}_Equivalents"
+                        condition_dict[param_name] = round(float(rec.get(param_name, 1.0)), 3)
                 
                 full_reaction_smiles = merge_reaction_with_conditions(naked_reaction_smiles, condition_dict)
                 yield_value = safe_predict_yield(oracle, full_reaction_smiles)
                 batch_yields.append(yield_value)
                 
                 current_best_yield = max(current_best_yield, yield_value)
+                
                 
                 optimization_history.append({
                     "iteration": i + 1,
@@ -897,6 +941,8 @@ def run_true_bayesian_optimization(
                         "Solvent": solvent,
                         "Reagent": reagent,
                         "Catalyst": catalyst,
+                        "Reagent_Equivalents": reagent_equivalents,
+                        "Catalyst_mol_percent": catalyst_mol_per,
                     },
                     "yield": round(float(yield_value), 2)
                 })
@@ -1005,11 +1051,27 @@ def run_true_bayesian_optimization(
                 solvent = rec.get('Solvent', final_solvents[0])
                 reagent = rec.get('Reagent', final_reagents[0])
                 catalyst = rec.get('Catalyst', final_catalysts[0])
+                reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
+                catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
                 
                 condition_dict = {
                     'solvent': solvent,
                     'reagent': reagent if reagent != "None" else "",
-                    'catalyst': catalyst if catalyst != "None" else ""
+                    'catalyst': catalyst if catalyst != "None" else "",
+                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
+                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
+                }
+                if num_reactants > 1:
+                    for i in range(1, num_reactants):
+                        param_name = f"Reactant_{i+1}_Equivalents"
+                        condition_dict[param_name] = round(float(rec.get(param_name, 1.0)), 3)
+                
+                condition_dict = {
+                    'solvent': solvent,
+                    'reagent': reagent if reagent != "None" else "",
+                    'catalyst': catalyst if catalyst != "None" else "",
+                    'reagent_eq': reagent_equivalents if reagent_equivalents != "None" else "",
+                    'catalyst_mol_per': catalyst_mol_per if catalyst_mol_per != "None" else "",
                 }
                 
                 full_reaction_smiles = merge_reaction_with_conditions(naked_reaction_smiles, condition_dict)
@@ -1028,6 +1090,8 @@ def run_true_bayesian_optimization(
                         "Solvent": solvent,
                         "Reagent": reagent,
                         "Catalyst": catalyst,
+                        "Reagent_Equivalents": reagent_equivalents,
+                        "Catalyst_mol_percent": catalyst_mol_per,
                     },
                     "yield": round(float(yield_value), 2)
                 })
@@ -1124,13 +1188,17 @@ def run_true_bayesian_optimization(
                 "solvents": final_solvents,
                 "reagents": final_reagents,
                 "catalysts": final_catalysts,
-                "temperature_range": [round(temp_min, 1), round(temp_max, 1)]
+                "temperature_range": [round(temp_min, 1), round(temp_max, 1)],
+                "reagent_eq_range": user_constraints['reagent_eq_range'] or (0.8, 5.0),
+                "catalyst_mol_percent_range": user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
             },
             "constraints_applied": {
                 "temperature_constrained": user_constraints['temperature_range'] is not None,
                 "solvents_constrained": user_constraints['solvents'] is not None,
                 "reagents_constrained": user_constraints['reagents'] is not None,
                 "catalysts_constrained": user_constraints['catalysts'] is not None,
+                "reagent_eq_range": user_constraints['reagent_eq_range'] is not None,
+                "catalyst_mol_percent_range":user_constraints['catalyst_mol_percent_range'] is not None,
                 "user_constraints": user_constraints
             },
             "rxn_insight_analysis": {

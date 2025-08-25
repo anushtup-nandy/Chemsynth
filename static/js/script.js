@@ -1307,6 +1307,27 @@ document.addEventListener('DOMContentLoaded', function() {
         setupState.classList.remove('hidden');
         loadingState.classList.add('hidden');
         resultsState.classList.add('hidden');
+
+        const reactants = nakedSmiles.split('>>')[0].split('.');
+        const constraintsContainer = document.getElementById('dynamic-reactant-constraints-container');
+        constraintsContainer.innerHTML = ''; // Clear previous dynamic content
+
+        if (reactants.length > 1) {
+            // Start loop from the second reactant (index 1)
+            for (let i = 1; i < reactants.length; i++) {
+                const reactantNum = i + 1;
+                const constraintHtml = `
+                    <div>
+                        <label class="block text-sm text-gray-300 mb-1">Reactant ${reactantNum} Equivalents</label>
+                        <div class="flex space-x-2">
+                            <input type="number" id="prior-r${reactantNum}-eq-min" class="molecule-input w-full" placeholder="Min (e.g., 0.8)">
+                            <input type="number" id="prior-r${reactantNum}-eq-max" class="molecule-input w-full" placeholder="Max (e.g., 3.0)">
+                        </div>
+                    </div>
+                `;
+                constraintsContainer.insertAdjacentHTML('beforeend', constraintHtml);
+            }
+        }
         
         // Reset the UI
         dataPointsContainer.innerHTML = '';
@@ -1324,13 +1345,29 @@ document.addEventListener('DOMContentLoaded', function() {
      * Adds a new empty row for entering a prior data point.
      */
     function addPriorDataPointRow() {
+        // --- MODIFIED: Dynamically generate reactant equivalent inputs ---
+        const reactants = currentOptimizationSmiles.split('>>')[0].split('.');
+        let reactantInputsHtml = '';
+        if (reactants.length > 1) {
+            for (let i = 1; i < reactants.length; i++) {
+                const reactantNum = i + 1;
+                reactantInputsHtml += `<input type="number" step="0.01" data-key="Reactant_${reactantNum}_Equivalents" class="molecule-input text-xs" placeholder="R${reactantNum} Eq.">`;
+            }
+        }
+        
+        // Adjust grid columns based on number of reactants
+        const totalColumns = 7 + Math.max(0, reactants.length - 1);
+
         const dataRowHtml = `
-            <div class="prior-data-row grid grid-cols-5 gap-2 items-center bg-gray-800 p-2 rounded">
-                <input type="number" data-key="Temperature" class="molecule-input text-xs" placeholder="Temp (°C)">
-                <input type="text" data-key="Solvent" class="molecule-input text-xs" placeholder="Solvent SMILES">
-                <input type="text" data-key="Reagent" class="molecule-input text-xs" placeholder="Reagent SMILES">
-                <input type="text" data-key="Catalyst" class="molecule-input text-xs" placeholder="Catalyst SMILES">
-                <input type="number" data-key="Yield" class="molecule-input text-xs font-bold" placeholder="Yield (%)">
+            <div class="prior-data-row grid gap-2 items-center bg-gray-800 p-2 rounded" style="grid-template-columns: repeat(${totalColumns}, minmax(0, 1fr));">
+                <input type="number" data-key="Temperature" class="molecule-input text-xs" placeholder="Temp">
+                <input type="text" data-key="Solvent" class="molecule-input text-xs" placeholder="Solvent">
+                <input type="text" data-key="Reagent" class="molecule-input text-xs" placeholder="Reagent">
+                <input type="text" data-key="Catalyst" class="molecule-input text-xs" placeholder="Catalyst">
+                ${reactantInputsHtml}
+                <input type="number" step="0.01" data-key="Reagent_Equivalents" class="molecule-input text-xs" placeholder="Rg Eq.">
+                <input type="number" step="0.01" data-key="Catalyst_mol_percent" class="molecule-input text-xs" placeholder="Cat %">
+                <input type="number" step="0.1" data-key="Yield" class="molecule-input text-xs font-bold" placeholder="Yield %">
             </div>
         `;
         dataPointsContainer.insertAdjacentHTML('beforeend', dataRowHtml);
@@ -1364,6 +1401,31 @@ document.addEventListener('DOMContentLoaded', function() {
         const tempMax = parseFloat(document.getElementById('prior-temp-max').value);
         if (!isNaN(tempMin) && !isNaN(tempMax)) {
             constraints.temperature_range = [tempMin, tempMax];
+        }
+        
+        const reagentEqMin = parseFloat(document.getElementById('prior-reagent-eq-min').value);
+        const reagentEqMax = parseFloat(document.getElementById('prior-reagent-eq-max').value);
+        if (!isNaN(reagentEqMin) && !isNaN(reagentEqMax)) {
+            constraints.reagent_eq_range = [reagentEqMin, reagentEqMax];
+        }
+
+        const catalystMolMin = parseFloat(document.getElementById('prior-catalyst-mol-min').value);
+        const catalystMolMax = parseFloat(document.getElementById('prior-catalyst-mol-max').value);
+        if (!isNaN(catalystMolMin) && !isNaN(catalystMolMax)) {
+            constraints.catalyst_mol_percent_range = [catalystMolMin, catalystMolMax];
+        }
+
+        const reactants = currentOptimizationSmiles.split('>>')[0].split('.');
+        if (reactants.length > 1) {
+            for (let i = 1; i < reactants.length; i++) {
+                const reactantNum = i + 1;
+                const minVal = parseFloat(document.getElementById(`prior-r${reactantNum}-eq-min`).value);
+                const maxVal = parseFloat(document.getElementById(`prior-r${reactantNum}-eq-max`).value);
+                if (!isNaN(minVal) && !isNaN(maxVal)) {
+                    // This key must match what the backend expects
+                    constraints[`reactant_${reactantNum}_eq_range`] = [minVal, maxVal];
+                }
+            }
         }
 
         // 2. Gather data points
@@ -1480,6 +1542,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const best = data.best_conditions;
         const maxConfidence = (data.max_yield / 100).toFixed(3);
 
+        let reactantDetailsHtml = '';
+        Object.keys(best).forEach(key => {
+            if (key.startsWith('Reactant_') && key.endsWith('_Equivalents')) {
+                const reactantNum = key.match(/\d+/)[0];
+                reactantDetailsHtml += `<li><span class="font-semibold">Reactant ${reactantNum}:</span> ${best[key].toFixed(2)} eq.</li>`;
+            }
+        });
+
         summaryContainer.innerHTML = `
             <div class="flex justify-between items-baseline mb-3">
                 <span class="text-sm text-gray-400">Max Confidence Score</span>
@@ -1490,8 +1560,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 <ul class="text-xs list-disc list-inside pl-2 mt-2 space-y-1 text-gray-400">
                     <li><span class="font-semibold">Temperature:</span> ${best.Temperature}°C</li>
                     <li><span class="font-semibold">Solvent:</span> ${best.Solvent}</li>
-                    <li><span class="font-semibold">Reagent:</span> ${best.Reagent}</li>
-                    <li><span class="font-semibold">Catalyst:</span> ${best.Catalyst}</li>
+                    <li><span class="font-semibold">Reagent:</span> ${best.Reagent} (${best.Reagent_Equivalents.toFixed(2)} eq.)</li>
+                    <li><span class="font-semibold">Catalyst:</span> ${best.Catalyst} (${best.Catalyst_mol_percent.toFixed(2)} mol%)</li>
+                    ${reactantDetailsHtml}
                 </ul>
             </div>
         `;
@@ -1507,35 +1578,92 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 5. Populate the History Table
         const tableContainer = document.getElementById('optimization-history-table');
-        let tableHtml = `<table class="w-full text-left text-xs">
-                            <thead class="bg-gray-900 text-gray-400 uppercase sticky top-0">
-                                <tr>
-                                    <th class="p-2">#</th>
-                                    <th class="p-2">Phase</th>
-                                    <th class="p-2">Temp (°C)</th>
-                                    <th class="p-2">Solvent</th>
-                                    <th class="p-2">Reagent</th>
-                                    <th class="p-2">Catalyst</th>
-                                    <th class="p-2 text-right">Confidence</th>
-                                </tr>
-                            </thead>
-                            <tbody class="text-gray-300">`;
-        data.optimization_history.forEach(h => {
-            const phaseClass = h.phase === 'random_exploration' ? 'text-yellow-400' : 'text-blue-400';
-            const confidence = (h.yield / 100).toFixed(3);
-            tableHtml += `
-                <tr class="border-t border-gray-700">
-                    <td class="p-2">${h.iteration}</td>
-                    <td class="p-2 ${phaseClass} capitalize">${h.phase.replace(/_/g, ' ')}</td>
-                    <td class="p-2">${h.conditions.Temperature}</td>
-                    <td class="p-2 font-mono">${h.conditions.Solvent}</td>
-                    <td class="p-2 font-mono">${h.conditions.Reagent}</td>
-                    <td class="p-2 font-mono">${h.conditions.Catalyst}</td>
-                    <td class="p-2 text-right font-semibold">${confidence}</td>
-                </tr>`;
+        const historyT = data.optimization_history;
+
+        // Step 0: Handle the case where there is no history data.
+        if (!historyT || historyT.length === 0) {
+            tableContainer.innerHTML = '<p class="text-center text-gray-400">No optimization history to display.</p>';
+            return; // Exit the function early
+        }
+
+        // Step 1: Define all possible columns and how to display them.
+        // This is our single source of truth for the table structure.
+        const columnDefinitions = [
+            { key: 'iteration', header: '#', class: 'p-2' },
+            { key: 'phase', header: 'Phase', class: 'p-2 capitalize' },
+            { key: 'Temperature', header: 'Temp (°C)', class: 'p-2' },
+            { key: 'Solvent', header: 'Solvent', class: 'p-2 font-mono' },
+            // This is a "compound" column that uses two data points
+            { key: 'Reagent', header: 'Reagent (Eq.)', class: 'p-2 font-mono' },
+            // This is another "compound" column
+            { key: 'Catalyst', header: 'Catalyst (mol %)', class: 'p-2 font-mono' },
+        ];
+
+        // Step 2: Discover the dynamic reactant columns from the first result.
+        const firstEntryConditions = historyT[0].conditions;
+        const dynamicReactantKeys = Object.keys(firstEntryConditions)
+            .filter(key => key.startsWith('Reactant_') && key.endsWith('_Equivalents'))
+            .sort(); // .sort() ensures R2, R3, ... R10 appear in order
+
+        // Add the discovered reactant columns to our definitions
+        dynamicReactantKeys.forEach(key => {
+            const reactantNumber = key.match(/\d+/)[0]; // Extracts the '2' from 'Reactant_2_Equivalents'
+            columnDefinitions.push({
+                key: key,
+                header: `R${reactantNumber} Eq.`,
+                class: 'p-2'
+            });
         });
-        tableHtml += `</tbody></table>`;
-        tableContainer.innerHTML = tableHtml;
+
+        // Add the final 'yield' column
+        columnDefinitions.push({
+            key: 'yield', header: 'Confidence', class: 'p-2 text-right font-semibold'
+        });
+
+        // Step 3: Build the table header HTML from our definitions.
+        const headerCells = columnDefinitions.map(col => `<th class="${col.class}">${col.header}</th>`).join('');
+        const headerHtml = `<thead class="bg-gray-900 text-gray-400 uppercase sticky top-0"><tr>${headerCells}</tr></thead>`;
+
+        // Step 4: Build the table body HTML by looping through each history entry.
+        const bodyRows = historyT.map(h => {
+            const c = h.conditions; // A shortcut to the conditions object
+
+            // Create the cells (<td>) for this row, in the correct order.
+            const rowCells = columnDefinitions.map(col => {
+                let cellContent = '';
+
+                // Use a switch to handle special formatting for certain columns.
+                switch (col.key) {
+                    case 'iteration':
+                        cellContent = h.iteration;
+                        break;
+                    case 'phase':
+                        const phaseClass = h.phase === 'random_exploration' ? 'text-yellow-400' : 'text-blue-400';
+                        cellContent = `<span class="${phaseClass}">${h.phase.replace(/_/g, ' ')}</span>`;
+                        break;
+                    case 'Reagent':
+                        cellContent = `${c.Reagent} (${c.Reagent_Equivalents.toFixed(2)})`;
+                        break;
+                    case 'Catalyst':
+                        cellContent = `${c.Catalyst} (${c.Catalyst_mol_percent.toFixed(2)})`;
+                        break;
+                    case 'yield':
+                        cellContent = (h.yield / 100).toFixed(3);
+                        break;
+                    default:
+                        cellContent = c[col.key] ?? 'N/A';
+                        break;
+                }
+                return `<td class="${col.class}">${cellContent}</td>`;
+            }).join('');
+
+            return `<tr class="border-t border-gray-700">${rowCells}</tr>`;
+        }).join('');
+
+        const bodyHtml = `<tbody class="text-gray-300">${bodyRows}</tbody>`;
+
+        // Step 5: Assemble the final table and inject it into the DOM.
+        tableContainer.innerHTML = `<table class="w-full text-left text-xs">${headerHtml}${bodyHtml}</table>`;
 
         // 6. Render the new Chart
         const ctx = document.getElementById('optimization-chart-new').getContext('2d');
