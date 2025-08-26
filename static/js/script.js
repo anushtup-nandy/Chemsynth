@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('add-prior-reagent-btn').addEventListener('click', addPriorReagentRow);
     document.getElementById('add-prior-catalyst-btn').addEventListener('click', addPriorCatalystRow);
+    document.getElementById('add-prior-starting-material-btn').addEventListener('click', addPriorStartingMaterialRow);
 
     let currentOptimizationSmiles = '';
 
@@ -1322,6 +1323,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Add an empty row to start with
         addPriorReagentRow();
+        addPriorStartingMaterialRow();
         addPriorCatalystRow();
         if (optimizationChartInstance) {
             optimizationChartInstance.destroy();
@@ -1376,6 +1378,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /**
+     * Adds a new row to the UI for specifying a starting material with its equivalent range.
+     */
+    function addPriorStartingMaterialRow() {
+        const container = document.getElementById('prior-starting-materials-container');
+        const newRow = document.createElement('div');
+        newRow.className = 'prior-starting-material-row grid grid-cols-3 gap-2 items-center';
+        newRow.innerHTML = `
+            <input type="text" class="molecule-input col-span-1" placeholder="Material SMILES">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Min Eq.">
+            <input type="number" step="0.01" class="molecule-input" placeholder="Max Eq.">
+        `;
+        container.appendChild(newRow);
+    }
+
+    /**
      * Adds a new row to the UI for specifying a catalyst with its mol% range.
      */
     function addPriorCatalystRow() {
@@ -1419,6 +1436,18 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         if (reagents.length > 0) constraints.reagents = reagents;
+
+        const starting_materials = [];
+        document.querySelectorAll('.prior-starting-material-row').forEach(row => {
+            const inputs = row.querySelectorAll('input');
+            const smiles = inputs[0].value.trim();
+            const minEq = parseFloat(inputs[1].value);
+            const maxEq = parseFloat(inputs[2].value);
+            if (smiles && !isNaN(minEq) && !isNaN(maxEq)) {
+                starting_materials.push({ smiles: smiles, eq_range: [minEq, maxEq] });
+            }
+        });
+        if (starting_materials.length > 0) constraints.starting_materials = starting_materials;
         
         const catalysts = [];
         document.querySelectorAll('.prior-catalyst-row').forEach(row => {

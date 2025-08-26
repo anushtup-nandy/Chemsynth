@@ -601,6 +601,7 @@ def run_true_bayesian_optimization(
         'temperature_range': None,
         'solvents': None,
         'reagents': None,
+        'starting_materials': None,
         'catalysts': None,
         'reagent_eq_range': None,
         'catalyst_mol_percent_range': None,
@@ -624,6 +625,10 @@ def run_true_bayesian_optimization(
         if 'reagents' in constraints and constraints['reagents']:
             user_constraints['reagents'] = constraints['reagents']
             logger.info(f"USER CONSTRAINT: Reagents = {constraints['reagents']}")
+
+        if 'starting_materials' in constraints and constraints['starting_materials']:
+            user_constraints['starting_materials'] = constraints['starting_materials']
+            logger.info(f"USER CONSTRAINT: Starting Materials = {constraints['starting_materials']}")
             
         if 'catalysts' in constraints and constraints['catalysts']:
             user_constraints['catalysts'] = constraints['catalysts']
@@ -866,6 +871,20 @@ def run_true_bayesian_optimization(
                 parameters.append(CategoricalParameter(name="Reagent", values=final_reagents, encoding="OHE"))
             reagent_eq_bounds = user_constraints['reagent_eq_range'] or (0.8, 5.0)
             parameters.append(NumericalContinuousParameter(name="Reagent_Equivalents", bounds=reagent_eq_bounds))
+
+        if (user_constraints.get('starting_materials') and
+            isinstance(user_constraints['starting_materials'], list) and
+            all(isinstance(sm, dict) and 'smiles' in sm and 'eq_range' in sm for sm in user_constraints['starting_materials'])):
+            
+            logger.info("Detected structured starting material constraints. Creating numerical parameters.")
+            for sm_info in user_constraints['starting_materials']:
+                sm_smiles = sm_info['smiles']
+                # Sanitize SMILES for valid parameter name
+                sanitized_smiles = "".join(c for c in sm_smiles if c.isalnum())
+                param_name = f"Starting_Material_{sanitized_smiles}_Equivalents"
+                bounds = tuple(sm_info['eq_range'])
+                parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
+                logger.info(f"Added numerical parameter for Starting Material '{sm_smiles}' with bounds {bounds}")
             
         # Check for the new structured format for catalysts
         # Expected format: constraints['catalysts'] = [{'smiles': '...', 'mol_percent_range': [min, max]}, ...]
@@ -942,6 +961,8 @@ def run_true_bayesian_optimization(
                 temp = rec['Temperature']
                 solvent = rec.get('Solvent', final_solvents[0])
                 reagent = rec.get('Reagent', final_reagents[0])
+                sm_parts = []
+                sm_eq_parts = []
                 condition_dict = {'solvent': solvent}
                 reagent_parts = []
                 reagent_eq_parts = []
@@ -959,6 +980,12 @@ def run_true_bayesian_optimization(
                         if original_smiles:
                             reagent_parts.append(original_smiles)
                             reagent_eq_parts.append(str(round(float(value), 3)))
+                    elif param_name.startswith('Starting_Material_') and param_name.endswith('_Equivalents'):
+                        sm_constraints = user_constraints.get('starting_materials') or []
+                        original_smiles = next((sm['smiles'] for sm in sm_constraints if "".join(c for c in sm['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            sm_parts.append(original_smiles)
+                            sm_eq_parts.append(str(round(float(value), 3)))
                     elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
                         catalyst_constraints = user_constraints.get('catalysts') or []
                         original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
@@ -976,6 +1003,11 @@ def run_true_bayesian_optimization(
                 elif reagent_parts:
                     condition_dict['reagent'] = ".".join(reagent_parts)
                     condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
+
+                if sm_parts:
+                    # Creating new keys for starting materials, assuming merge_reaction_with_conditions can handle them.
+                    condition_dict['starting_material'] = ".".join(sm_parts)
+                    condition_dict['starting_material_eq'] = ",".join(sm_eq_parts)
 
                 if not catalyst_parts and 'Catalyst' in rec:
                     catalyst = rec.get('Catalyst', 'None')
@@ -1121,6 +1153,8 @@ def run_true_bayesian_optimization(
                 condition_dict = {'solvent': solvent}
                 reagent_parts = []
                 reagent_eq_parts = []
+                sm_parts = []
+                sm_eq_parts = []
                 catalyst_parts = []
                 catalyst_mol_per_parts = []
                 
@@ -1135,6 +1169,12 @@ def run_true_bayesian_optimization(
                         if original_smiles:
                             reagent_parts.append(original_smiles)
                             reagent_eq_parts.append(str(round(float(value), 3)))
+                    elif param_name.startswith('Starting_Material_') and param_name.endswith('_Equivalents'):
+                        sm_constraints = user_constraints.get('starting_materials') or []
+                        original_smiles = next((sm['smiles'] for sm in sm_constraints if "".join(c for c in sm['smiles'] if c.isalnum()) in param_name), None)
+                        if original_smiles:
+                            sm_parts.append(original_smiles)
+                            sm_eq_parts.append(str(round(float(value), 3)))
                     elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
                         catalyst_constraints = user_constraints.get('catalysts') or []
                         original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
@@ -1152,6 +1192,11 @@ def run_true_bayesian_optimization(
                 elif reagent_parts:
                     condition_dict['reagent'] = ".".join(reagent_parts)
                     condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
+
+                if sm_parts:
+                    # Creating new keys for starting materials, assuming merge_reaction_with_conditions can handle them.
+                    condition_dict['starting_material'] = ".".join(sm_parts)
+                    condition_dict['starting_material_eq'] = ",".join(sm_eq_parts)
 
                 if not catalyst_parts and 'Catalyst' in rec:
                     catalyst = rec.get('Catalyst', 'None')
@@ -1290,6 +1335,7 @@ def run_true_bayesian_optimization(
                 "temperature_constrained": user_constraints['temperature_range'] is not None,
                 "solvents_constrained": user_constraints['solvents'] is not None,
                 "reagents_constrained": user_constraints['reagents'] is not None,
+                "starting_materials_constrained": user_constraints['starting_materials'] is not None,
                 "catalysts_constrained": user_constraints['catalysts'] is not None,
                 "reagent_eq_range": user_constraints['reagent_eq_range'] is not None,
                 "catalyst_mol_percent_range":user_constraints['catalyst_mol_percent_range'] is not None,
