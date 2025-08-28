@@ -5,6 +5,7 @@ let sourcingData = {};
 let currentTargetSMILES = '';
 let cy; // Cytoscape instance
 let optimizationChartInstance = null;
+let stepCache = {};
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('ChemSynthAI Platform Initialized');
@@ -80,26 +81,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Dynamic event listeners for expanding reactants/visualizations ---
     routeContentContainer.addEventListener('click', function(e) {
-        if (e.target.matches('.expand-reactant-btn')) {
+        // Handle the "Expand" button click in the detailed step view
+        const expandButton = e.target.closest('.expand-reactant-btn');
+        if (expandButton) {
             e.preventDefault();
-            const button = e.target;
-            const smiles = button.dataset.smiles;
-            const targetContainerId = button.dataset.target;
-            handleExpandReactant(smiles, targetContainerId, button);
+            handleExpandReactant(expandButton);
+            return; 
         }
-    });
 
-    routeContentContainer.addEventListener('click', function(e) {
-        const expandableBox = e.target.closest('.expandable-molecule');
-        if (expandableBox) {
+        // Handle the "Go Back" button click
+        const goBackButton = e.target.closest('.go-back-btn');
+        if (goBackButton) {
             e.preventDefault();
-            const smiles = expandableBox.dataset.smiles;
-            const targetContainerId = expandableBox.dataset.targetId;
-            handleExpandVisualization(smiles, targetContainerId, expandableBox);
+            handleGoBack(goBackButton);
+            return;
         }
-    });
 
-    routeContentContainer.addEventListener('click', function(e) {
+        // Handle the "Optimize" button click
         if (e.target.matches('.optimize-step-btn') || e.target.closest('.optimize-step-btn')) {
             e.preventDefault();
             const button = e.target.closest('.optimize-step-btn');
@@ -358,15 +356,36 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function handleExpandReactant(smiles, targetContainerId, button) {
-        const container = document.getElementById(targetContainerId);
-        if (!container) return;
+    /**
+     * Handles the click on an "Expand" button for a reactant.
+     * Replaces the entire step card with the sub-synthesis route.
+     * @param {HTMLElement} button The clicked button element.
+     */
+    async function handleExpandReactant(button) {
+        const smiles = button.dataset.smiles;
+        const cardId = button.dataset.cardId;
+        const reactantFormula = button.dataset.reactantFormula;
+        const cardElement = document.getElementById(cardId);
 
-        // Prevent multiple clicks
+        if (!cardElement) {
+            console.error("Could not find card element with ID:", cardId);
+            return;
+        }
+
+        // 1. Cache the original content of the card
+        stepCache[cardId] = cardElement.innerHTML;
+
+        // 2. Show loading state inside the card
         button.disabled = true;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+        cardElement.innerHTML = `
+            <div class="text-center p-8">
+                <i class="fas fa-atom fa-spin text-blue-400 text-2xl"></i>
+                <p class="mt-3 text-sm text-gray-400">Expanding synthesis for ${reactantFormula}...</p>
+            </div>
+        `;
 
         try {
+            // 3. Fetch the sub-route from the API
             const response = await fetch('/api/plan_synthesis', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -376,21 +395,106 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "Failed to fetch sub-route.");
 
+            let newHtml = '';
             if (data.routes && data.routes.length > 0) {
-                // Render the best sub-route
-                renderSubRoute(data.routes[0], container);
-                button.style.display = 'none'; // Hide button after successful expansion
+                // 4a. Render the sub-route if found
+                newHtml = renderSubRouteAsCardContent(data.routes[0], cardId, reactantFormula);
             } else {
-                container.innerHTML = `<p class="text-xs text-green-400 italic mt-2">This is a stock material (no further synthesis found).</p>`;
-                button.style.display = 'none';
+                // 4b. Render a "Stock Material" message if no route is found
+                newHtml = `
+                    <div class="p-4">
+                        <button class="go-back-btn text-sm text-blue-400 hover:text-blue-300 mb-4" data-card-id="${cardId}">
+                            <i class="fas fa-arrow-left mr-2"></i>Back to Original Step
+                        </button>
+                        <div class="text-center bg-gray-800 rounded-md p-6">
+                            <i class="fas fa-check-circle text-green-400 text-2xl"></i>
+                            <p class="font-semibold mt-2">${reactantFormula} is a Stock Material</p>
+                            <p class="text-xs text-gray-500 mt-1">No further synthesis route was found.</p>
+                        </div>
+                    </div>
+                `;
             }
+            cardElement.innerHTML = newHtml;
 
         } catch (error) {
             console.error('Error expanding synthesis tree:', error);
-            container.innerHTML = `<p class="text-xs text-red-400 italic mt-2">Error: ${error.message}</p>`;
-            button.disabled = false; // Re-enable button on failure
-            button.innerHTML = '<i class="fas fa-search-plus mr-1"></i> Expand';
+            // 5. Render error and provide a way back
+            cardElement.innerHTML = `
+                <div class="p-4">
+                    <button class="go-back-btn text-sm text-blue-400 hover:text-blue-300 mb-4" data-card-id="${cardId}">
+                        <i class="fas fa-arrow-left mr-2"></i>Back to Original Step
+                    </button>
+                    <div class="text-center text-red-400 p-6 bg-red-900 bg-opacity-30 rounded-md">
+                        <p class="font-bold">Error expanding route:</p>
+                        <p class="text-xs mt-1">${error.message}</p>
+                    </div>
+                </div>
+            `;
         }
+    }
+
+    /**
+     * Handles the click on a "Go Back" button.
+     * Restores the original step card content from the cache.
+     * @param {HTMLElement} button The clicked button element.
+     */
+    function handleGoBack(button) {
+        const cardId = button.dataset.cardId;
+        const cardElement = document.getElementById(cardId);
+
+        if (cardElement && stepCache[cardId]) {
+            cardElement.innerHTML = stepCache[cardId];
+            delete stepCache[cardId]; // Clean up cache to save memory
+        } else {
+            console.error("Could not find card or cache for ID:", cardId);
+        }
+    }
+
+    /**
+     * Generates the HTML for a sub-route to be displayed within an expanded card.
+     * @param {object} subRoute - The sub-route data from the API.
+     * @param {string} originalCardId - The ID of the parent card for the back button.
+     * @param {string} reactantFormula - The formula of the reactant being expanded.
+     * @returns {string} The generated HTML string.
+     */
+    function renderSubRouteAsCardContent(subRoute, originalCardId, reactantFormula) {
+        if (!subRoute || !subRoute.steps || subRoute.steps.length === 0) {
+            return `<p class="text-xs text-gray-400 italic mt-2">Could not render sub-route.</p>`;
+        }
+
+        let subStepsHtml = subRoute.steps.map(step => {
+            const reactantsList = step.reactants.map(r => `<span class="font-mono text-blue-300">${r.formula}</span>`).join(' + ');
+            const productFormula = `<span class="font-mono text-green-300">${step.product.formula}</span>`;
+            const confidence = `(conf: ${((step.yield || 0) / 100).toFixed(2)})`;
+
+            return `
+                <div class="bg-gray-800 p-3 rounded-md mb-2">
+                    <p class="text-xs font-semibold">
+                        Sub-Step ${step.step_number}: ${step.title}
+                        <span class="text-gray-400 font-normal ml-2">${confidence}</span>
+                    </p>
+                    <p class="text-sm mt-1">${reactantsList} &rarr; ${productFormula}</p>
+                    <p class="text-xs text-gray-400 mt-2">
+                        <span class="font-medium">Conditions:</span> ${step.reagents_conditions || 'N/A'}
+                    </p>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="p-0">
+                <div class="p-4">
+                    <button class="go-back-btn text-sm text-blue-400 hover:text-blue-300 mb-3" data-card-id="${originalCardId}">
+                        <i class="fas fa-arrow-left mr-2"></i>Back to Original Step
+                    </button>
+                    <h4 class="font-bold mb-1">Sub-Synthesis for ${reactantFormula}</h4>
+                    <p class="text-xs text-gray-400 mb-3">Overall Confidence: ${(subRoute.overall_yield / 100).toFixed(2)}</p>
+                </div>
+                <div class="px-4 pb-4 max-h-96 overflow-y-auto">
+                    ${subStepsHtml}
+                </div>
+            </div>
+        `;
     }
 
     async function handleExpandVisualization(smiles, targetContainerId, clickedBox) {
@@ -654,7 +758,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderSingleRoute(routeData) {
         let contentHtml = `
             ${renderRouteVisualization(routeData)}
-            ${renderRouteDetails(routeData.steps)}
+            ${renderRouteDetails(routeData)}
             ${renderRouteEvaluation(routeData.evaluation)}
         `;
         routeContentContainer.innerHTML = contentHtml;
@@ -681,21 +785,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 blockHtml += `
                 <div class="flex flex-col items-center">
-                    <div class="molecule-display flex-shrink-0 expandable-molecule" 
-                         data-smiles="${initialReactantSmiles}" 
-                         data-target-id="sub-viz-${route.id}-initial">
+                    <div class="molecule-display flex-shrink-0">
                         <div class="text-center p-4">
                             <div class="text-xs text-gray-400 mb-1">Starting Material(s)</div>
                             <div class="font-bold">${reactantNames}</div>
                         </div>
                     </div>
-                    <div id="sub-viz-${route.id}-initial" class="w-full mt-2"></div>
                 </div>`;
             }
 
-            // Render the arrow and the product box for the current step
-            const expandableClass = isFinalProduct ? '' : 'expandable-molecule';
-            const borderColor = isFinalProduct ? 'border-2 border-blue-500' : '';
+            const expandableClass = '';
+            const borderColor = isFinalProduct ? 'border-2 border-blue-500' : ''; 
             const textColor = isFinalProduct ? 'text-blue-400' : '';
             const titleText = isFinalProduct ? 'Target Molecule' : `Intermediate`;
 
@@ -778,7 +878,8 @@ document.addEventListener('DOMContentLoaded', function() {
         containerElement.innerHTML = subVizHtml;
     }
 
-    function renderRouteDetails(steps) {
+    function renderRouteDetails(routeData) {
+        const steps = routeData.steps;
         if (!steps) return '';
         let detailsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">';
         
@@ -787,26 +888,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? `<div class="bg-white rounded-md p-2 mb-4"><img src="${step.reaction_image_url}" alt="Reaction diagram for step ${step.step_number}" class="w-full h-auto"/></div>`
                 : `<div class="bg-gray-800 rounded-md p-2 mb-4 text-center text-xs text-gray-500">Image not available</div>`;
 
-            // <<< NEW: Generate list of reactants with expand buttons >>>
+            // Create a unique ID for the card container
+            const cardContainerId = `step-card-container-${routeData.id}-${step.step_number}`;
+
             const reactantsHtml = step.reactants.map((reactant, reactantIndex) => {
-                const subRouteContainerId = `sub-route-container-s${stepIndex}-r${reactantIndex}`;
-                // Only show expand button if it's not the final target molecule
                 const expandButton = reactant.smiles !== currentTargetSMILES
                     ? `<button class="expand-reactant-btn text-blue-400 hover:text-blue-300 text-xs ml-2" 
                                 data-smiles="${reactant.smiles}" 
-                                data-target="${subRouteContainerId}">
-                           <i class="fas fa-search-plus mr-1"></i> Expand
-                       </button>`
+                                data-card-id="${cardContainerId}"
+                                data-reactant-formula="${reactant.formula}">
+                        <i class="fas fa-search-plus mr-1"></i> Expand
+                    </button>`
                     : '';
 
                 return `<li class="flex justify-between items-center py-1">
                             <span class="font-mono text-xs">${reactant.formula}</span>
                             ${expandButton}
-                        </li>
-                        <div id="${subRouteContainerId}" class="pl-4 border-l-2 border-gray-600 ml-2"></div>`;
+                        </li>`;
             }).join('');
 
-            // Add the "Optimize" button. It uses the `naked_reaction_smiles` passed from the backend.
             const optimizeButtonHtml = `
                 <button class="optimize-step-btn gradient-bg-blue text-white font-medium py-2 px-4 rounded-lg hover:shadow-lg w-full mt-4 text-sm"
                         data-smiles="${step.naked_reaction_smiles}">
@@ -814,7 +914,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </button>`;
 
             detailsHtml += `
-                <div class="bg-gray-700 rounded-lg p-4 flex flex-col">
+                <div class="bg-gray-700 rounded-lg p-4 flex flex-col" id="${cardContainerId}">
                     <h4 class="font-bold mb-2">Step ${step.step_number}: ${step.title}</h4>
                     <p class="text-sm text-gray-300 mb-3"><span class="font-medium">Conditions:</span> ${step.reagents_conditions}</p>
                     
@@ -823,9 +923,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="flex-grow">
                         <h5 class="text-sm font-semibold mb-2">Reactants:</h5>
                         <ul class="text-sm text-gray-300 mb-3 space-y-1">
-                           ${reactantsHtml}
+                        ${reactantsHtml}
                         </ul>
-                        <!--<div class="text-xs text-gray-400 mb-2"><span class="font-medium">Predicted Yield:</span> ${(step.yield || 0).toFixed(1)}%</div>-->
                         <div class="text-xs text-gray-400 mb-2"><span class="font-medium">Confidence Score:</span> ${((step.yield || 0) / 100).toFixed(2)}</div>
                         <div class="text-xs text-gray-400"><span class="font-medium">Notes:</span> ${step.source_notes}</div>
                     </div>
