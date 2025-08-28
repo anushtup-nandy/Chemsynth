@@ -452,6 +452,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /**
      * Generates the HTML for a sub-route to be displayed within an expanded card.
+     * This version renders each sub-step as a fully interactive "mini-card"
+     * AND includes the visual reaction equation.
      * @param {object} subRoute - The sub-route data from the API.
      * @param {string} originalCardId - The ID of the parent card for the back button.
      * @param {string} reactantFormula - The formula of the reactant being expanded.
@@ -463,24 +465,65 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         let subStepsHtml = subRoute.steps.map(step => {
-            const reactantsList = step.reactants.map(r => `<span class="font-mono text-blue-300">${r.formula}</span>`).join(' + ');
-            const productFormula = `<span class="font-mono text-green-300">${step.product.formula}</span>`;
-            const confidence = `(conf: ${((step.yield || 0) / 100).toFixed(2)})`;
+            // Create a unique ID for this sub-step's container, so it can be replaced upon expansion
+            const subStepContainerId = `sub-step-card-${originalCardId}-${step.step_number}`;
 
+            // --- Create the visual reaction equation ---
+            const reactantsEquationList = step.reactants.map(r => `<span class="font-mono text-blue-300">${r.formula}</span>`).join(' + ');
+            const productEquationFormula = `<span class="font-mono text-green-300">${step.product.formula}</span>`;
+            const reactionEquationHtml = `<p class="text-sm">${reactantsEquationList} &rarr; ${productEquationFormula}</p>`;
+
+            // Generate interactive reactants list with their own "Expand" buttons
+            const reactantsInteractiveList = step.reactants.map(reactant => {
+                const expandButton = reactant.smiles !== currentTargetSMILES
+                    ? `<button class="expand-reactant-btn text-blue-400 hover:text-blue-300 text-xs ml-2" 
+                                data-smiles="${reactant.smiles}" 
+                                data-card-id="${subStepContainerId}"
+                                data-reactant-formula="${reactant.formula}">
+                        <i class="fas fa-search-plus mr-1"></i> Expand
+                    </button>`
+                    : '';
+
+                return `<li class="flex justify-between items-center py-1">
+                            <span class="font-mono text-xs">${reactant.formula}</span>
+                            ${expandButton}
+                        </li>`;
+            }).join('');
+
+            // Generate the "Optimize" button for the sub-step
+            const optimizeButtonHtml = `
+                <button class="optimize-step-btn bg-gray-600 text-white font-medium py-1 px-3 rounded-md hover:bg-gray-500 w-full mt-3 text-xs"
+                        data-smiles="${step.naked_reaction_smiles}">
+                    <i class="fas fa-cogs mr-1"></i> Optimize
+                </button>`;
+
+            // Assemble the HTML for this individual sub-step card
             return `
-                <div class="bg-gray-800 p-3 rounded-md mb-2">
+                <div id="${subStepContainerId}" class="bg-gray-800 p-3 rounded-md mb-2 border border-gray-700">
                     <p class="text-xs font-semibold">
                         Sub-Step ${step.step_number}: ${step.title}
-                        <span class="text-gray-400 font-normal ml-2">${confidence}</span>
                     </p>
-                    <p class="text-sm mt-1">${reactantsList} &rarr; ${productFormula}</p>
-                    <p class="text-xs text-gray-400 mt-2">
+                    <div class="text-xs text-gray-400 mb-2">
+                        <span class="font-medium">Confidence:</span> ${((step.yield || 0) / 100).toFixed(2)}
+                    </div>
+                    <div class="text-xs text-gray-400 mb-2">
                         <span class="font-medium">Conditions:</span> ${step.reagents_conditions || 'N/A'}
-                    </p>
+                    </div>
+                    
+                    <!-- Re-added reaction equation -->
+                    <div class="my-3 p-2 bg-gray-900 rounded-md text-center">
+                        ${reactionEquationHtml}
+                    </div>
+                    
+                    <h6 class="text-xs font-semibold mt-2 mb-1">Interactive Reactants:</h6>
+                    <ul class="text-sm text-gray-300 mb-2 space-y-1">${reactantsInteractiveList}</ul>
+                    
+                    ${optimizeButtonHtml}
                 </div>
             `;
         }).join('');
 
+        // Assemble the final container for the entire sub-synthesis view
         return `
             <div class="p-0">
                 <div class="p-4">
