@@ -9,6 +9,14 @@ def is_cas_number(query: str) -> bool:
     cas_pattern = r'^\d{2,7}-\d{2}-\d$'
     return bool(re.match(cas_pattern, query.strip()))
 
+def is_chemical_compound(query: str) -> bool:
+    """check if the query looks like a chemical compound"""
+    smiles_pattern = r'^[CNOSPFClBrI\[\]()=\-+#@\d]+$'
+    formula_pattern = r'^C\d*H\d*[A-Z][a-z]?\d*'
+
+    return (bool(re.match(smiles_pattern, query)) or bool(re.match(formula_pattern, query)) or
+            len(query.split()) <= 3)
+
 def get_search_cascade(original_query: str, compound_name: str = None) -> tuple[list[str], str]:
     """
     Generates a list of contextualized search queries, from most specific to most broad.
@@ -25,7 +33,8 @@ def get_search_cascade(original_query: str, compound_name: str = None) -> tuple[
     # Contextualize base terms
     for term in set(base_terms):
         # The query for scholarly databases should be specific
-        cascade.append(f'"{term}" AND (synthesis OR reaction OR chemical OR molecule)')
+        # cascade.append(f'"{term}" AND (synthesis OR reaction OR chemical OR molecule)')
+        cascade.append(f'"{term}" AND (synthesis OR "synthetic route" OR preparation OR "chemical synthesis")')
         cascade.append(term) # Also try without context as a fallback
 
     # Level 3: Parent Compound Extraction
@@ -130,6 +139,23 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
                 print(error_msg)
                 results['errors'].append(error_msg)
 
+    def final_relevance_check(papers, original_query):
+        """Final check to ensure papers are actually about the compound"""
+        validated_papers = []
+        query_terms = set(original_query.lower().split())
+        
+        for paper in papers:
+            title_words = set(paper.get('title', '').lower().split())
+            abstract_words = set(paper.get('summary', '')[:200].lower().split())  # First 200 chars
+            
+            # Check if compound name appears in title or early abstract
+            if (query_terms & title_words) or (query_terms & abstract_words):
+                validated_papers.append(paper)
+            elif paper.get('relevance_score', 0) >= 8:  # Keep very high scoring papers
+                validated_papers.append(paper)
+        
+        return validated_papers
+
     # --- Combine and format results ---
     all_papers_raw = (
         results.get("arxiv_papers", []) + 
@@ -149,6 +175,8 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
 
     # 2. Score and filter the unique papers
     relevant_papers = score_and_filter_results(unique_papers_raw, search_cascade)
+    relevant_papers = final_relevance_check(relevant_papers, query)
+
 
     print(f"Found {len(all_papers_raw)} raw results, "
           f"filtered down to {len(relevant_papers)} relevant papers after scoring.")
@@ -182,7 +210,7 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
 def score_and_filter_results(
     all_papers: list, 
     search_terms: list, 
-    min_relevance_score: int = 2
+    min_relevance_score: int = 5
 ) -> list:
     """
     Scores papers based on chemical relevance and filters out irrelevant results.
@@ -199,9 +227,9 @@ def score_and_filter_results(
     
     # Define chemistry-related keywords and irrelevant field keywords
     CHEM_KEYWORDS = {
-        'synthesis', 'reaction', 'chemical', 'molecule', 'compound', 'organic', 
-        'medicinal', 'pharmacology', 'catalyst', 'inhibitor', 'binding', 
-        'derivative', 'scaffold', 'reagent', 'yield', 'spectroscopy', 'nmr'
+        'synthesis', 'synthetic', 'preparation', 'route', 'method', 
+        'compound', 'derivative', 'analog', 'scaffold', 'precursor',
+        'yield', 'reaction', 'mechanism', 'catalyst', 'reagent'
     }
     IRRELEVANT_KEYWORDS = {
         'astrophysics', 'galaxy', 'cosmology', 'black hole', 'star', 'nebula',
@@ -209,8 +237,19 @@ def score_and_filter_results(
         'string theory', 'mathematics' # Use 'mathematics' carefully, can overlap
     }
 
+    def contains_compound_reference(text: str, search_terms: list) -> bool:
+        """Check if text actually discusses the specific compound"""
+        text_lower = text.lower()
+        compound_mentioned = any(term.lower() in text_lower for term in search_terms[:2])
+        
+        # Look for synthesis-related context around the compound mention
+        if compound_mentioned:
+            synthesis_context = ['synthesis of', 'preparation of', 'route to', 'making', 'formation of']
+            return any(context in text_lower for context in synthesis_context)
+        return False
+
     # Use the first two (most specific) search terms for primary scoring
-    primary_search_terms = {term.lower() for term in search_terms[:2]}
+    primary_search_terms = [term.lower() for term in search_terms[:2]]
 
     for paper in all_papers:
         relevance_score = 0
@@ -251,6 +290,8 @@ def score_and_filter_results(
         relevance_score -= found_irrelevant_keywords * 5
 
         # --- Final Decision ---
+        if not contains_compound_reference(text_content, search_terms[:2]):
+            continue 
         if relevance_score >= min_relevance_score:
             paper['relevance_score'] = relevance_score # Add score to dict for debugging
             scored_papers.append(paper)

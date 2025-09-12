@@ -19,6 +19,18 @@ def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str
     """
     print(f"Searching PubChem literature for query: '{query}'")
     literature_results: List[Dict[str, Any]] = []
+
+    def validate_compound_match(compound, original_query):
+        """Ensure the found compound actually matches the search"""
+        try:
+            synonyms = getattr(compound, 'synonyms', [])
+            if synonyms:
+                query_lower = original_query.lower()
+                return any(query_lower in syn.lower() or syn.lower() in query_lower 
+                        for syn in synonyms[:5])
+        except:
+            pass
+        return True
     
     # Enhanced search strategies - include CAS number search
     search_strategies = [
@@ -71,7 +83,10 @@ def search_pubchem_literature(query: str, max_results: int = 5) -> List[Dict[str
             if not pmid_list:
                 print(f"No PubMed articles found for CID {cid}")
                 continue
-                
+            
+            if not validate_compound_match(compound, query):
+                continue
+
             print(f"Found {len(pmid_list)} associated PMIDs for CID {cid}")
             
             # Fetch literature details

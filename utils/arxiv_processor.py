@@ -30,14 +30,14 @@ CHEMISTRY_FOCUSED_CATEGORIES = [
     'q-bio.CB',    # Cell Behavior (drug effects on cells)
     
     # ==================== STATISTICS & ML - QSAR and Drug Discovery ====================
-    'stat.ML',     # Machine Learning (QSAR, drug discovery ML)
-    'stat.AP',     # Applications (clinical trial analysis, experimental design)
-    'stat.ME',     # Methodology (statistical methods for pharmaceutical research)
+    #'stat.ML',     # Machine Learning (QSAR, drug discovery ML)
+    #'stat.AP',     # Applications (clinical trial analysis, experimental design)
+    #'stat.ME',     # Methodology (statistical methods for pharmaceutical research)
     
     # ==================== MATHEMATICS - Modeling (Limited to Most Relevant) ====================
-    'math.OC',     # Optimization (reaction optimization, drug design)
-    'math.NA',     # Numerical Analysis (computational chemistry methods)
-    'math.DS',     # Dynamical Systems (reaction networks, pharmacokinetics)
+    #'math.OC',     # Optimization (reaction optimization, drug design)
+    #'math.NA',     # Numerical Analysis (computational chemistry methods)
+    #'math.DS',     # Dynamical Systems (reaction networks, pharmacokinetics)
 ]
 
 # Extended categories for broader searches (use when primary search yields few results)
@@ -128,6 +128,8 @@ def search_arxiv(
             else:
                 # Check if the title/abstract suggests chemistry relevance
                 title_abstract = (res.title + " " + res.summary).lower()
+                if any(term.lower() in title_abstract for term in search_terms[:1]):  # Only check first term
+                    other_relevant_papers.append(res)
                 chemistry_keywords = [
                     'synthesis', 'chemical', 'molecule', 'drug', 'pharmaceutical', 
                     'compound', 'reaction', 'catalyst', 'organic', 'medicinal',
