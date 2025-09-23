@@ -1,8 +1,10 @@
 from utils import arxiv_processor, web_searcher
 from utils.pubchem_processor import search_pubchem_literature
+from utils.semantic_scholar_processor import SemanticScholarProcessor
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.europe_pmc_processor import search_europe_pmc
 import re
+import os
 
 def is_cas_number(query: str) -> bool:
     """Check if the query looks like a CAS registry number."""
@@ -33,7 +35,6 @@ def get_search_cascade(original_query: str, compound_name: str = None) -> tuple[
     # Contextualize base terms
     for term in set(base_terms):
         # The query for scholarly databases should be specific
-        # cascade.append(f'"{term}" AND (synthesis OR reaction OR chemical OR molecule)')
         cascade.append(f'"{term}" AND (synthesis OR "synthetic route" OR preparation OR "chemical synthesis")')
         cascade.append(term) # Also try without context as a fallback
 
@@ -58,21 +59,62 @@ def get_search_cascade(original_query: str, compound_name: str = None) -> tuple[
 
 def perform_literature_search(query: str, compound_name: str = None, resolved_smiles: str = None, max_results: int = 5) -> dict:
     """
-    Orchestrates a literature search using a hierarchical cascade strategy.
+    Orchestrates a literature search using Semantic Scholar as the primary source,
+    with other sources as supplements.
     """
     results = {
-        "arxiv_papers": [], "pubchem_papers": [], "europe_pmc_papers": [], 
-        "web_results": [], "errors": [], "search_log": []
+        "semantic_scholar_papers": [], "arxiv_papers": [], "pubchem_papers": [], 
+        "europe_pmc_papers": [], "web_results": [], "errors": [], "search_log": []
     }
 
+    # Get API key from environment if available
+    semantic_scholar_api_key = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+    
     # Generate the cascade of search terms
     search_cascade, web_query = get_search_cascade(query, compound_name)
     
     print(f"Starting literature search for: '{query}'")
     
-    # --- Function to search a single source with the cascade ---
+    # --- Initialize Semantic Scholar processor ---
+    semantic_scholar = SemanticScholarProcessor(api_key=semantic_scholar_api_key)
+    
+    # --- Function to search Semantic Scholar (Priority #1) ---
+    def search_semantic_scholar_priority():
+        """Search Semantic Scholar with optimized chemistry queries"""
+        log_entry = "Searching Semantic Scholar (Priority Source)..."
+        print(log_entry)
+        results['search_log'].append(log_entry)
+        
+        try:
+            # Use the compound name for better search if available
+            search_term = compound_name or query
+            papers = semantic_scholar.search_papers(
+                query=query, 
+                compound_name=compound_name, 
+                max_results=max_results * 2  # Get more for filtering
+            )
+            
+            if papers:
+                log_entry = f"  => Semantic Scholar: Found {len(papers)} relevant papers"
+                print(log_entry)
+                results['search_log'].append(log_entry)
+                return papers
+            else:
+                log_entry = "  => Semantic Scholar: No results found"
+                print(log_entry)
+                results['search_log'].append(log_entry)
+                return []
+                
+        except Exception as e:
+            error_msg = f"Semantic Scholar search failed: {e}"
+            print(error_msg)
+            results['errors'].append(error_msg)
+            results['search_log'].append(error_msg)
+            return []
+    
+    # --- Function to search other sources with the cascade ---
     def search_source_with_cascade(search_function, source_name):
-        log_entry = f"Searching {source_name}..."
+        log_entry = f"Searching {source_name} (Supplementary)..."
         print(log_entry)
         results['search_log'].append(log_entry)
         
@@ -84,9 +126,9 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
                 # For arXiv, use extended categories on later attempts
                 use_extended = i > 0
                 if source_name == "arXiv":
-                    found_results = search_function(term, max_results=max_results* 2, use_extended_categories=use_extended)
-                else: # PubChem
-                    found_results = search_function(term, max_results=max_results* 2)
+                    found_results = search_function(term, max_results=max_results, use_extended_categories=use_extended)
+                else: # PubChem, Europe PMC
+                    found_results = search_function(term, max_results=max_results)
 
                 if found_results:
                     log_entry = f"  => Success! Found {len(found_results)} results for '{term}'."
@@ -117,12 +159,18 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
             results['search_log'].append(error_msg)
             return []
 
-    # Execute searches in parallel
+    # Execute searches - Semantic Scholar first (synchronously for priority), others in parallel
+    print("=== Phase 1: Semantic Scholar Priority Search ===")
+    semantic_papers = search_semantic_scholar_priority()
+    results["semantic_scholar_papers"] = semantic_papers
+
+    print("=== Phase 2: Supplementary Sources ===")
+    # Execute supplementary searches in parallel
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_source = {
-           executor.submit(search_source_with_cascade, arxiv_processor.search_arxiv, "arXiv"): "arxiv",
+            executor.submit(search_source_with_cascade, arxiv_processor.search_arxiv, "arXiv"): "arxiv",
             executor.submit(search_source_with_cascade, search_pubchem_literature, "PubChem"): "pubchem",
-            executor.submit(search_source_with_cascade, search_europe_pmc, "EuropePMC"): "europe_pmc", # NEW
+            executor.submit(search_source_with_cascade, search_europe_pmc, "EuropePMC"): "europe_pmc",
             executor.submit(safe_web_search): "web"
         }
 
@@ -132,7 +180,7 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
                 data = future.result()
                 if source == "arxiv": results["arxiv_papers"] = data
                 elif source == "pubchem": results["pubchem_papers"] = data
-                elif source == "europe_pmc": results["europe_pmc_papers"] = data # NEW
+                elif source == "europe_pmc": results["europe_pmc_papers"] = data
                 elif source == "web": results["web_results"] = data
             except Exception as exc:
                 error_msg = f'{source} search generated an exception: {exc}'
@@ -156,43 +204,64 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
         
         return validated_papers
 
-    # --- Combine and format results ---
-    all_papers_raw = (
+    # --- Combine and format results with Semantic Scholar prioritization ---
+    print("=== Phase 3: Result Processing ===")
+    
+    # Start with high-quality Semantic Scholar results
+    all_papers_raw = results.get("semantic_scholar_papers", [])
+    
+    # Add supplementary results
+    supplementary_papers = (
         results.get("arxiv_papers", []) + 
         results.get("pubchem_papers", []) + 
         results.get("europe_pmc_papers", [])
     )
+    
+    # Add supplementary papers, but prioritize Semantic Scholar
+    all_papers_raw.extend(supplementary_papers)
 
     # 1. Deduplicate first to avoid scoring the same paper multiple times
     seen_ids = set()
     unique_papers_raw = []
     for paper in all_papers_raw:
         # Use DOI or entry_id as a unique identifier
-        paper_id = paper.get('doi') or paper.get('entry_id')
+        paper_id = paper.get('doi') or paper.get('entry_id') or paper.get('title', '').lower().strip()
         if paper_id and paper_id not in seen_ids:
             unique_papers_raw.append(paper)
             seen_ids.add(paper_id)
 
-    # 2. Score and filter the unique papers
+    # 2. Score and filter the unique papers (Semantic Scholar papers already scored)
     relevant_papers = score_and_filter_results(unique_papers_raw, search_cascade)
     relevant_papers = final_relevance_check(relevant_papers, query)
 
+    # 3. Boost Semantic Scholar papers in final ranking
+    for paper in relevant_papers:
+        if paper.get('source_db') == 'Semantic Scholar':
+            paper['relevance_score'] = paper.get('relevance_score', 0) + 2  # Small boost for SS papers
+
+    # 4. Final sort by relevance
+    relevant_papers.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
 
     print(f"Found {len(all_papers_raw)} raw results, "
           f"filtered down to {len(relevant_papers)} relevant papers after scoring.")
 
-    # 3. Format the final, relevant papers
+    # 5. Format the final, relevant papers
     formatted_papers = [
         {
             "title": p.get("title"),
-            "source": f"{', '.join(p.get('authors', [])[:3])}... ({str(p.get('published', 'N/A'))[:4]}) - {p.get('source_db', 'N/A')}",
+            "source": p.get("source") or f"{', '.join(p.get('authors', [])[:3])}... ({str(p.get('published', 'N/A'))[:4]}) - {p.get('source_db', 'N/A')}",
             "abstract": p.get("summary"),
             "url": p.get("pdf_url"),
-            "relevance_score": p.get("relevance_score") # Include for transparency
+            "relevance_score": p.get("relevance_score"),  # Include for transparency
+            "citation_count": p.get("citation_count", 0),  # Include citation count
+            "source_db": p.get("source_db")  # Track source database
         } for p in relevant_papers[:max_results] # Return top N results
     ]
 
     print(f"Literature search complete. Found {len(formatted_papers)} unique papers.")
+    
+    # Calculate search statistics
+    semantic_scholar_count = len([p for p in formatted_papers if p.get('source_db') == 'Semantic Scholar'])
     
     return {
         "papers": formatted_papers,
@@ -203,7 +272,12 @@ def perform_literature_search(query: str, compound_name: str = None, resolved_sm
             "search_cascade_attempted": search_cascade,
             "web_query_used": web_query,
             "search_log": results['search_log'],
-            "errors": results['errors']
+            "errors": results['errors'],
+            "source_breakdown": {
+                "semantic_scholar": semantic_scholar_count,
+                "other_sources": len(formatted_papers) - semantic_scholar_count,
+                "total": len(formatted_papers)
+            }
         }
     }
 
@@ -214,14 +288,7 @@ def score_and_filter_results(
 ) -> list:
     """
     Scores papers based on chemical relevance and filters out irrelevant results.
-
-    Args:
-        all_papers: A list of combined paper dictionaries from all sources.
-        search_terms: The list of terms used in the search cascade (for scoring).
-        min_relevance_score: The minimum score required to keep a paper.
-
-    Returns:
-        A sorted list of relevant paper dictionaries.
+    Note: Semantic Scholar papers come pre-scored, others need scoring.
     """
     scored_papers = []
     
@@ -252,12 +319,18 @@ def score_and_filter_results(
     primary_search_terms = [term.lower() for term in search_terms[:2]]
 
     for paper in all_papers:
+        # Skip scoring if already scored (Semantic Scholar papers)
+        if paper.get('relevance_score') is not None and paper.get('source_db') == 'Semantic Scholar':
+            if paper['relevance_score'] >= min_relevance_score:
+                scored_papers.append(paper)
+            continue
+        
         relevance_score = 0
         title = paper.get('title', '').lower()
         abstract = paper.get('summary', '').lower()
         text_content = title + " " + abstract
 
-        # --- Scoring Logic ---
+        # --- Scoring Logic for non-Semantic Scholar papers ---
 
         # 1. Direct hit on primary search term (highest value)
         if any(term in title for term in primary_search_terms):
