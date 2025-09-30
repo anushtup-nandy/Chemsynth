@@ -4,21 +4,24 @@ import pandas as pd
 import numpy as np
 import torch
 from typing import List, Dict, Tuple, Optional, Any
-
+import json
 from baybe import Campaign
-from baybe.parameters import CategoricalParameter, NumericalContinuousParameter
+from baybe.parameters import (
+    CategoricalParameter, 
+    NumericalContinuousParameter,
+    SubstanceParameter
+)
 from baybe.searchspace import SearchSpace
 from baybe.targets import NumericalTarget
 from baybe.objectives import SingleTargetObjective
-from baybe.recommenders import BotorchRecommender, RandomRecommender
-from baybe.surrogates import GaussianProcessSurrogate
-from baybe.acquisition import (
-    ExpectedImprovement, 
-    UpperConfidenceBound, 
-    ProbabilityOfImprovement,
-    qExpectedImprovement,  # For batch acquisition
-    qUpperConfidenceBound   # For batch acquisition
+from baybe.recommenders import (
+    BotorchRecommender, 
+    RandomRecommender,
+    TwoPhaseMetaRecommender,
+    FPSRecommender
 )
+from baybe.surrogates import GaussianProcessSurrogate
+
 from rxn_insight.reaction import Reaction
 from utils.llm_interface import generate_text
 from utils.prompt_loader import format_prompt
@@ -26,10 +29,9 @@ from utils.prompt_loader import format_prompt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info("rxn-insight successfully imported")
+
 LLM_AVAILABLE = True
 logger.info("LLM interface successfully imported for optimization analysis.")
-# LLM_AVAILABLE = False
-# logger.warning("LLM interface not available. Improvement suggestions will be skipped.")
 RXN_INSIGHT_AVAILABLE = True
 
 try:
@@ -42,6 +44,19 @@ except ImportError:
     from utils.yield_optimizer import AdvancedYieldPredictor, merge_reaction_with_conditions
 
 ORACLE = None
+
+def is_valid_smiles(smiles: str) -> bool:
+    """Validate if a string is valid SMILES"""
+    if not smiles or not isinstance(smiles, str):
+        return False
+    if smiles.strip().lower() == 'none':
+        return False
+    try:
+        from rdkit import Chem
+        mol = Chem.MolFromSmiles(smiles)
+        return mol is not None
+    except:
+        return False
 
 def safe_predict_yield(oracle: AdvancedYieldPredictor, full_reaction_smiles: str) -> float:
     """
@@ -92,7 +107,8 @@ def safe_predict_yield(oracle: AdvancedYieldPredictor, full_reaction_smiles: str
     except Exception as e:
         logger.error(f"Yield prediction failed for '{full_reaction_smiles}': {e}", exc_info=True)
         return 0.0
-    
+
+
 def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 20) -> tuple:
     """
     Advanced rxn-insight-based condition recommendation system.
@@ -109,14 +125,14 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         
         # Initialize comprehensive results storage
         conditions_aggregator = {
-            'solvents': {},      # {solvent: {count, confidence, sources}}
-            'reagents': {},      # {reagent: {count, confidence, sources}}  
-            'catalysts': {},     # {catalyst: {count, confidence, sources}}
-            'temperatures': [],   # [(temp, confidence, source)]
-            'additives': {},     # Additional reagents/bases/acids
-            'atmospheres': {},   # Reaction atmosphere conditions
-            'times': [],         # Reaction time data
-            'pressures': []      # Pressure conditions
+            'solvents': {},
+            'reagents': {},
+            'catalysts': {},
+            'temperatures': [],
+            'additives': {},
+            'atmospheres': {},
+            'times': [],
+            'pressures': []
         }
         
         # Create Reaction object with enhanced analysis
@@ -124,20 +140,10 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         
         # 1. COMPREHENSIVE REACTION ANALYSIS
         logger.info("Performing comprehensive reaction analysis...")
-        
-        # Get full reaction information
         reaction_info = rxn.get_reaction_info()
-        
-        # Get functional group analysis
         functional_groups = getattr(rxn, 'get_functional_groups', lambda: {})()
-        
-        # Get ring analysis
         ring_analysis = getattr(rxn, 'get_ring_changes', lambda: {})()
-        
-        # Get molecular descriptors
         descriptors = getattr(rxn, 'get_descriptors', lambda: {})()
-        
-        # Get reaction classification with confidence
         classification = getattr(rxn, 'classify_reaction', lambda: {})()
         
         logger.info(f"Reaction analysis complete - Class: {classification.get('class', 'Unknown')}")
@@ -146,11 +152,9 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         logger.info("Mining conditions from similar reactions...")
         
         try:
-            # Find similar reactions with multiple similarity metrics
             similar_reactions = []
-            
-            # Try different similarity methods if available
             similarity_methods = ['tanimoto', 'structural', 'functional_group']
+            
             for method in similarity_methods:
                 try:
                     similar_batch = getattr(rxn, 'find_similar_reactions', lambda **kwargs: [])(
@@ -162,10 +166,8 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
                 except (AttributeError, Exception) as e:
                     logger.debug(f"Similarity method {method} not available: {e}")
             
-            # Fallback to basic similarity search
             if not similar_reactions:
-                similar_reactions = getattr(rxn, 'find_similar', 
-                                          lambda n=50: [])(n=min(50, n_conditions * 3))
+                similar_reactions = getattr(rxn, 'find_similar', lambda n=50: [])(n=min(50, n_conditions * 3))
             
             logger.info(f"Found {len(similar_reactions)} similar reactions for analysis")
             
@@ -174,9 +176,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
                 try:
                     similarity_score = similar_rxn.get('similarity', 0.5)
                     rxn_conditions = similar_rxn.get('conditions', {})
-                    rxn_data = similar_rxn.get('reaction_data', {})
-                    
-                    # Extract and weight conditions by similarity score
                     confidence = similarity_score
                     source = f"similar_rxn_{idx}"
                     
@@ -243,12 +242,12 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
                         if temp_key in rxn_conditions:
                             try:
                                 temp_val = float(rxn_conditions[temp_key])
-                                if 0 <= temp_val <= 500:  # Reasonable temperature range
+                                if 0 <= temp_val <= 500:
                                     conditions_aggregator['temperatures'].append((temp_val, confidence, source))
                             except (ValueError, TypeError):
                                 pass
                     
-                    # Process additional conditions
+                    # Process atmospheres
                     if 'atmosphere' in rxn_conditions:
                         atm = rxn_conditions['atmosphere']
                         if atm not in conditions_aggregator['atmospheres']:
@@ -275,11 +274,9 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         logger.info("Enhancing conditions based on functional group analysis...")
         
         try:
-            # Get reaction center functional groups
             reactant_fg = functional_groups.get('reactants', {})
             product_fg = functional_groups.get('products', {})
             
-            # Analyze functional group changes for mechanism insights
             fg_changes = {}
             for fg in set(list(reactant_fg.keys()) + list(product_fg.keys())):
                 reactant_count = reactant_fg.get(fg, 0)
@@ -291,10 +288,8 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
                         'net_change': product_count - reactant_count
                     }
             
-            # Use functional group database to suggest conditions
             fg_condition_db = getattr(rxn, 'get_fg_conditions', lambda fg_dict: {})(fg_changes)
             
-            # Integrate functional group-based conditions
             for condition_type, suggestions in fg_condition_db.items():
                 if condition_type in conditions_aggregator:
                     for suggestion in suggestions:
@@ -311,14 +306,11 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         # 4. STATISTICAL ANALYSIS AND RANKING
         logger.info("Performing statistical analysis and ranking...")
         
-        # Rank and filter conditions by statistical significance
         def rank_conditions(condition_dict, min_count=1, max_results=None):
-            """Rank conditions by weighted score combining count and confidence"""
             ranked = []
             for name, data in condition_dict.items():
-                # Calculate composite score
                 avg_confidence = data['confidence'] / max(data['count'], 1)
-                popularity_score = min(data['count'] / 10.0, 1.0)  # Normalize count
+                popularity_score = min(data['count'] / 10.0, 1.0)
                 composite_score = (0.7 * avg_confidence) + (0.3 * popularity_score)
                 
                 if data['count'] >= min_count:
@@ -330,7 +322,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
                         'sources': len(set(data['sources']))
                     })
             
-            # Sort by composite score
             ranked.sort(key=lambda x: x['score'], reverse=True)
             
             if max_results:
@@ -338,7 +329,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
             
             return ranked
         
-        # Rank all condition types
         ranked_solvents = rank_conditions(conditions_aggregator['solvents'], min_count=1, max_results=15)
         ranked_reagents = rank_conditions(conditions_aggregator['reagents'], min_count=1, max_results=12)
         ranked_catalysts = rank_conditions(conditions_aggregator['catalysts'], min_count=1, max_results=12)
@@ -350,7 +340,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
             temps = [t[0] for t in conditions_aggregator['temperatures']]
             confidences = [t[1] for t in conditions_aggregator['temperatures']]
             
-            # Weighted statistics
             weighted_temps = np.average(temps, weights=confidences)
             temp_std = np.std(temps)
             
@@ -368,7 +357,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
         # 5. COMPILE FINAL RESULTS
         logger.info("Compiling final condition recommendations...")
         
-        # Extract top conditions
         final_conditions = {
             'solvents': [item['name'] for item in ranked_solvents],
             'reagents': [item['name'] for item in ranked_reagents],
@@ -378,7 +366,6 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
             'temperature_analysis': temp_analysis
         }
         
-        # Comprehensive metadata
         metadata = {
             'reaction_class': classification.get('class', 'Unknown'),
             'reaction_confidence': classification.get('confidence', 0),
@@ -414,84 +401,48 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
             'methodology': 'advanced_rxn_insight_failed'
         }
 
-def create_bayesian_campaign(searchspace: SearchSpace, use_random_for_initial: bool = True, 
-                           acquisition_type: str = "EI", batch_size: int = 1) -> Optional[Campaign]:
+def get_adaptive_batch_size(
+    iteration: int, 
+    total_iterations: int, 
+    current_best_yield: float
+) -> int:
     """
-    Create a Bayesian optimization campaign with advanced acquisition functions.
+    Determine batch size based on optimization phase.
+    """
+    progress = iteration / max(total_iterations, 1)
+    
+    if progress < 0.3:
+        return 3  # Early exploration
+    elif progress < 0.7:
+        return 2 if current_best_yield < 60 else 1
+    else:
+        return 1  # Late exploitation
+
+
+def create_adaptive_recommender(phase_config: Dict[str, Any]) -> BotorchRecommender:
+    """
+    Create BotorchRecommender with dynamically selected acquisition function.
     
     Args:
-        acquisition_type: "EI", "UCB", "PI", "qEI", "qUCB" for different strategies
-        batch_size: Number of parallel recommendations (>1 enables batch optimization)
+        phase_config: Dictionary containing acquisition_function_cls and acquisition_function_kwargs
+        
+    Returns:
+        Configured BotorchRecommender instance
     """
-    target = NumericalTarget(name="Yield", mode="MAX", bounds=(0, 100))
-    objective = SingleTargetObjective(target)
-    
-    try:
-        if use_random_for_initial:
-            recommender = RandomRecommender()
-            logger.info("Created campaign with Random recommender for initial sampling")
-        else:
-            # Advanced acquisition function selection
-            if acquisition_type == "EI":
-                acq_func = ExpectedImprovement()
-            elif acquisition_type == "UCB":
-                acq_func = UpperConfidenceBound(beta=2.0)
-            elif acquisition_type == "PI":
-                acq_func = ProbabilityOfImprovement()
-            elif acquisition_type == "qEI" and batch_size > 1:
-                acq_func = qExpectedImprovement()
-            elif acquisition_type == "qUCB" and batch_size > 1:
-                acq_func = qUpperConfidenceBound(beta=2.0)
-            else:
-                # Fallback to EI for invalid combinations
-                acq_func = ExpectedImprovement()
-                logger.warning(f"Invalid acquisition type '{acquisition_type}' for batch_size {batch_size}, using EI")
-            
-            recommender = BotorchRecommender(
-                surrogate_model=GaussianProcessSurrogate(),
-                acquisition_function=acq_func
-            )
-            logger.info(f"Created campaign with {acquisition_type} acquisition function, batch_size={batch_size}")
-        
-        campaign = Campaign(
-            searchspace=searchspace,
-            objective=objective,
-            recommender=recommender
-        )
-        
-        return campaign
-        
-    except Exception as e:
-        logger.error(f"Failed to create campaign: {e}")
-        return None
+    return BotorchRecommender(
+        surrogate_model=GaussianProcessSurrogate(),
+        acquisition_function_cls=phase_config["acquisition_function_cls"],
+        acquisition_function_kwargs=phase_config.get("acquisition_function_kwargs", {})
+    )
 
-def switch_to_bayesian_recommender(campaign: Campaign, acquisition_type: str = "EI", 
-                                 batch_size: int = 1) -> Campaign:
+def switch_to_bayesian_recommender_advanced(campaign: Campaign, batch_size: int = 1) -> Campaign:
     """
-    Switch to Bayesian optimization with specified acquisition function and batch size.
+    Switch to Bayesian optimization with BotorchRecommender.
     Returns a new campaign object with the transferred measurements.
     """
     try:
-        # Select acquisition function
-        if acquisition_type == "EI":
-            acq_func = ExpectedImprovement()
-        elif acquisition_type == "UCB":
-            acq_func = UpperConfidenceBound(beta=2.0)
-        elif acquisition_type == "PI":
-            acq_func = ProbabilityOfImprovement()
-        elif acquisition_type == "qEI" and batch_size > 1:
-            acq_func = qExpectedImprovement()
-        elif acquisition_type == "qUCB" and batch_size > 1:
-            acq_func = qUpperConfidenceBound(beta=2.0)
-        else:
-            acq_func = ExpectedImprovement()
-            logger.warning(f"Using EI fallback for {acquisition_type} with batch_size {batch_size}")
-        
-        # Create new recommender
-        bayesian_recommender = BotorchRecommender(
-            surrogate_model=GaussianProcessSurrogate(),
-            acquisition_function=acq_func
-        )
+        # Create standard BotorchRecommender (no acquisition function parameters)
+        bayesian_recommender = BotorchRecommender()
         
         # Store existing measurements
         existing_measurements = None
@@ -508,34 +459,100 @@ def switch_to_bayesian_recommender(campaign: Campaign, acquisition_type: str = "
         # Transfer measurements to new campaign if they exist
         if existing_measurements is not None and not existing_measurements.empty:
             new_campaign.add_measurements(existing_measurements)
-            logger.info(f"Transferred {len(existing_measurements)} measurements to {acquisition_type} campaign")
+            logger.info(f"Transferred {len(existing_measurements)} measurements to Bayesian campaign")
         
-        logger.info(f"Successfully created new {acquisition_type} campaign with batch_size={batch_size}")
         return new_campaign
         
     except Exception as e:
         logger.warning(f"Failed to switch to Bayesian recommender: {e}")
-        return campaign  # Return original campaign on failure
-    
-def get_adaptive_acquisition_strategy(iteration: int, total_iterations: int, 
-                                    current_best_yield: float) -> Tuple[str, int]:
+        return campaign
+
+
+def analyze_recommendations_with_uncertainty(
+    campaign: Campaign, 
+    recommendations: pd.DataFrame,
+    current_best: float
+) -> List[Dict[str, Any]]:
     """
-    Dynamically select acquisition function and batch size based on optimization progress.
+    Provide uncertainty metrics for each recommendation.
     
-    Returns: (acquisition_type, batch_size)
+    Returns:
+        List of dicts containing uncertainty metrics for each recommendation
     """
-    progress = iteration / total_iterations
+    uncertainty_analysis = []
     
-    # Early stage: exploration with batch sampling
-    if progress < 0.4:          # MORE EXPLORATION TIME
-        return ("qEI", 3)       # LARGER BATCHES
-    elif progress < 0.8:        # LONGER BALANCED PHASE
-        if current_best_yield < 60:  # LOWER THRESHOLD
-            return ("UCB", 2)   # BATCH UCB FOR MORE EXPLORATION
-        else:
-            return ("EI", 1)
-    else:
-        return ("PI", 1)
+    try:
+        # Check if campaign has a surrogate model we can query
+        if not hasattr(campaign, 'recommender'):
+            return [{"error": "No recommender available"} for _ in range(len(recommendations))]
+        
+        recommender = campaign.recommender
+        
+        # Try to get posterior predictions from the surrogate
+        for idx, (_, rec) in enumerate(recommendations.iterrows()):
+            try:
+                # Basic uncertainty metrics
+                analysis = {
+                    'conditions': rec.to_dict(),
+                    'predicted_yield_mean': None,
+                    'predicted_yield_std': None,
+                    'confidence_interval_95': None,
+                    'probability_of_improvement': None,
+                    'expected_improvement': None,
+                    'coefficient_of_variation': None,
+                    'recommendation_quality': 'medium'
+                }
+                
+                # If we have measurements, calculate empirical uncertainty
+                if hasattr(campaign, 'measurements') and len(campaign.measurements) > 0:
+                    recent_yields = campaign.measurements['Yield'].tail(10)
+                    empirical_std = recent_yields.std()
+                    empirical_mean = recent_yields.mean()
+                    
+                    # Estimate uncertainty based on historical data
+                    analysis['predicted_yield_std'] = float(empirical_std)
+                    analysis['predicted_yield_mean'] = float(empirical_mean)
+                    
+                    # Calculate confidence interval
+                    ci_width = 1.96 * empirical_std
+                    analysis['confidence_interval_95'] = [
+                        max(0, empirical_mean - ci_width),
+                        min(100, empirical_mean + ci_width)
+                    ]
+                    
+                    # Coefficient of variation
+                    cv = empirical_std / (empirical_mean + 1e-9)
+                    analysis['coefficient_of_variation'] = float(cv)
+                    
+                    # Quality assessment
+                    if cv < 0.1:
+                        analysis['recommendation_quality'] = 'high'
+                    elif cv > 0.3:
+                        analysis['recommendation_quality'] = 'low'
+                    
+                    # Probability of improvement (simplified estimate)
+                    if empirical_std > 0:
+                        z_score = (empirical_mean - current_best) / empirical_std
+                        # Approximate using standard normal CDF
+                        from scipy.stats import norm
+                        poi = float(norm.cdf(z_score))
+                        analysis['probability_of_improvement'] = poi
+                
+                uncertainty_analysis.append(analysis)
+                
+            except Exception as e:
+                logger.debug(f"Error analyzing recommendation {idx}: {e}")
+                uncertainty_analysis.append({
+                    'conditions': rec.to_dict(),
+                    'error': str(e)
+                })
+                
+    except Exception as e:
+        logger.warning(f"Uncertainty analysis failed: {e}")
+        return [{"error": str(e)} for _ in range(len(recommendations))]
+    
+    return uncertainty_analysis
+
 
 def initialize_oracle() -> Optional[AdvancedYieldPredictor]:
     """
@@ -570,6 +587,7 @@ def initialize_oracle() -> Optional[AdvancedYieldPredictor]:
             return None
     return ORACLE
 
+
 def run_true_bayesian_optimization(
     naked_reaction_smiles: str,
     num_initial_candidates: int = 20,
@@ -581,8 +599,7 @@ def run_true_bayesian_optimization(
     prior_knowledge: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    Enhanced Bayesian optimization with rxn-insight integration for expanded condition space.
-    Fixed to properly handle user constraints without overriding them.
+    Enhanced Bayesian optimization with chemistry-aware parameters and adaptive acquisition.
     """
     logger.info(f"Starting ENHANCED Bayesian Optimization for: {naked_reaction_smiles}")
     
@@ -595,7 +612,7 @@ def run_true_bayesian_optimization(
         return {"error": "Could not initialize the simulation oracle"}
     
     # ========================================================================
-    # EARLY CONSTRAINT EXTRACTION - Extract all constraints at the beginning
+    # EARLY CONSTRAINT EXTRACTION
     # ========================================================================
     user_constraints = {
         'temperature_range': None,
@@ -649,11 +666,13 @@ def run_true_bayesian_optimization(
                     user_constraints[param_key] = constraints[param_key]
                     logger.info(f"USER CONSTRAINT: Reactant {i+1} Equiv. = {constraints[param_key]}")
 
-    # ENHANCED Generate Search Space with rxn-insight integration
+    # ========================================================================
+    # GENERATE SEARCH SPACE WITH RXN-INSIGHT INTEGRATION
+    # ========================================================================
     try:
         logger.info(f"Generating enhanced search space...")
         
-        # Get initial conditions from existing RCR model
+        # Get initial conditions from RCR model
         initial_conditions, _ = oracle.condition_predictor.get_n_conditions(
             naked_reaction_smiles, n=num_initial_candidates, return_scores=True
         )
@@ -680,7 +699,7 @@ def run_true_bayesian_optimization(
                 if catalyst and isinstance(catalyst, str) and catalyst.strip():
                     model_catalysts.add(catalyst.strip())
         
-        # ENHANCED: Advanced rxn-insight integration with intelligent merging
+        # Advanced rxn-insight integration
         rxn_insight_metadata = {}
         if use_rxn_insight:
             try:
@@ -703,15 +722,14 @@ def run_true_bayesian_optimization(
                     model_reagents = list(rxn_reagents) + [r for r in model_reagents if r not in rxn_reagents]
                     model_catalysts = list(rxn_catalysts) + [c for c in model_catalysts if c not in rxn_catalysts]
                     
-                    # Advanced temperature integration (only if no user constraints)
+                    # Advanced temperature integration
                     if not user_constraints['temperature_range']:
                         temp_analysis = rxn_insight_conditions.get('temperature_analysis', {})
                         if temp_analysis and 'recommended_range' in temp_analysis:
                             rxn_temp_range = temp_analysis['recommended_range']
                             if len(rxn_temp_range) == 2:
-                                # Use rxn-insight temperature range if statistically significant
                                 data_points = temp_analysis.get('data_points', 0)
-                                if data_points >= 3:  # Sufficient data
+                                if data_points >= 3:
                                     model_temps = rxn_temp_range
                                     logger.info(f"Using rxn-insight temperature range: {rxn_temp_range[0]:.1f}-{rxn_temp_range[1]:.1f}°C "
                                                f"(based on {data_points} similar reactions)")
@@ -727,7 +745,7 @@ def run_true_bayesian_optimization(
                 rxn_insight_metadata = {'analysis_successful': False, 'error': str(e)}
         
         # ========================================================================
-        # CONSTRAINT APPLICATION - Apply user constraints or use model predictions
+        # CONSTRAINT APPLICATION
         # ========================================================================
         
         # SOLVENTS: User constraints take absolute priority
@@ -735,7 +753,6 @@ def run_true_bayesian_optimization(
             final_solvents = [s for s in user_constraints['solvents'] if s]
             logger.info(f"USING USER SOLVENT CONSTRAINTS: {len(final_solvents)} solvents")
         else:
-            # Apply intelligent filtering based on rxn-insight rankings
             if use_rxn_insight and rxn_insight_metadata.get('analysis_successful', False):
                 top_conditions = rxn_insight_metadata.get('top_ranked_conditions', {})
                 if 'solvents' in top_conditions:
@@ -787,11 +804,10 @@ def run_true_bayesian_optimization(
             temp_min, temp_max = user_constraints['temperature_range']
             logger.info(f"USING USER TEMPERATURE CONSTRAINTS: {temp_min}°C to {temp_max}°C")
         else:
-            # Use model-based temperature range
             if model_temps:
-                model_temps = [t for t in model_temps if -100 <= t <= 400]  # Filter reasonable temperatures
+                model_temps = [t for t in model_temps if -100 <= t <= 400]
                 temp_min, temp_max = min(model_temps), max(model_temps)
-                if temp_max - temp_min < 10.0:  # Ensure reasonable range
+                if temp_max - temp_min < 10.0:
                     temp_center = (temp_min + temp_max) / 2
                     temp_min = max(0, temp_center - 25)
                     temp_max = min(300, temp_center + 25)
@@ -805,40 +821,25 @@ def run_true_bayesian_optimization(
         if "None" not in final_catalysts:
             final_catalysts.append("None")
             
-        # Ensure we have fallback options when no model data available
+        # Ensure fallback options when no model data available
         if not final_solvents:
             final_solvents = [
-                "C1CCOC1",      # THF
-                "CCOCC",        # Diethyl ether  
-                "ClCCl",        # DCM
-                "c1ccccc1",     # Benzene/Toluene
-                "CC(C)=O",      # Acetone
-                "CN(C)C=O",     # DMF
-                "CCCCCC",       # Hexane
-                "CCO",          # Ethanol
-                "CO",           # Methanol
-                "ClC(Cl)Cl"     # Chloroform
+                "C1CCOC1", "CCOCC", "ClCCl", "c1ccccc1", "CC(C)=O",
+                "CN(C)C=O", "CCCCCC", "CCO", "CO", "ClC(Cl)Cl"
             ]
 
         if not final_reagents or final_reagents == ["None"]:
             final_reagents = [
-                "None", "O", "Cl", "F", "Br", "I",           # Basic reagents
-                "[Li+]", "[Na+]", "[K+]",                    # Metal cations
-                "CCN(CC)CC",                                  # Triethylamine
-                "C1CCC2=NCCCN2CC1",                         # DBU
-                "ClC(=O)C(=O)Cl",                           # Oxalyl chloride
-                "CC(C)(C)OC(=O)N",                          # Boc anhydride
-                "ClS(=O)(=O)c1ccc(C)cc1"                    # TsCl
+                "None", "O", "Cl", "F", "Br", "I", "[Li+]", "[Na+]", "[K+]",
+                "CCN(CC)CC", "C1CCC2=NCCCN2CC1", "ClC(=O)C(=O)Cl",
+                "CC(C)(C)OC(=O)N", "ClS(=O)(=O)c1ccc(C)cc1"
             ]
 
         if not final_catalysts or final_catalysts == ["None"]:
             final_catalysts = [
-                "None",
-                "[Pd]",                    # Palladium
-                "[Ni]", 
-                "[Cu]",
-                "c1ccc(P(c2ccccc2)c2ccccc2)cc1",  # PPh3
-                "CC1(C)c2cccc(P(c3ccccc3)c3ccccc3)c2Oc2c(P(c3ccccc3)c3ccccc3)cccc21"  # BINAP
+                "None", "[Pd]", "[Ni]", "[Cu]",
+                "c1ccc(P(c2ccccc2)c2ccccc2)cc1",
+                "CC1(C)c2cccc(P(c3ccccc3)c3ccccc3)c2Oc2c(P(c3ccccc3)c3ccccc3)cccc21"
             ]
         
         logger.info(f"FINAL SEARCH SPACE: {len(final_solvents)} solvents, {len(final_reagents)} reagents, "
@@ -847,31 +848,71 @@ def run_true_bayesian_optimization(
     except Exception as e:
         logger.error(f"Error generating enhanced search space: {e}", exc_info=True)
         return {"error": f"Failed to generate search space: {e}"}
+    
+    # Filter out invalid SMILES
+    final_reagents = [r for r in final_reagents if is_valid_smiles(r)]
+    final_catalysts = [c for c in final_catalysts if is_valid_smiles(c)]
+    final_solvents = [s for s in final_solvents if is_valid_smiles(s)]
 
-    # Create Search Space with properly constrained parameters
+    # Add "None" option ONLY after validation
+    if not any(r.lower() == 'none' for r in final_reagents):
+        final_reagents.append("None")
+    if not any(c.lower() == 'none' for c in final_catalysts):
+        final_catalysts.append("None")
+
+    # ========================================================================
+    # CREATE SEARCH SPACE WITH CHEMISTRY-AWARE PARAMETERS
+    # ========================================================================
     try:
         parameters = []
         
+        # Track which chemical parameters use SubstanceParameter vs structured numerical
+        use_substance_params = {
+            'solvents': True,
+            'reagents': True,
+            'catalysts': True
+        }
+        
+        # REAGENTS: Check for structured constraints
         if (user_constraints.get('reagents') and 
             isinstance(user_constraints['reagents'], list) and 
             all(isinstance(r, dict) and 'smiles' in r and 'eq_range' in r for r in user_constraints['reagents'])):
             
             logger.info("Detected structured reagent constraints. Creating numerical parameters.")
+            use_substance_params['reagents'] = False
+            
             for reagent_info in user_constraints['reagents']:
                 reagent_smiles = reagent_info['smiles']
-                # Sanitize SMILES for valid parameter name
                 sanitized_smiles = "".join(c for c in reagent_smiles if c.isalnum())
                 param_name = f"Reagent_{sanitized_smiles}_Equivalents"
                 bounds = tuple(reagent_info['eq_range'])
                 parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
                 logger.info(f"Added numerical parameter for Reagent '{reagent_smiles}' with bounds {bounds}")
         else:
-            # Fallback to original categorical logic
+            # Use SubstanceParameter with chemical encoding
+            # For reagents
             if len(final_reagents) > 1:
-                parameters.append(CategoricalParameter(name="Reagent", values=final_reagents, encoding="OHE"))
+                # Exclude "None" from SubstanceParameter data dict
+                reagent_smiles_dict = {
+                    f"Reagent_{i}": smiles 
+                    for i, smiles in enumerate(final_reagents) 
+                    if smiles.lower() != "none"
+                }
+                if reagent_smiles_dict:  # Only create if we have valid SMILES
+                    parameters.append(
+                        SubstanceParameter(
+                            name="Reagent",
+                            data=reagent_smiles_dict,
+                            encoding="MORDRED",
+                            decorrelate=True
+                        )
+                    )
+                logger.info(f"Created SubstanceParameter for Reagent with RDKIT encoding ({len(final_reagents)} options)")
+            
             reagent_eq_bounds = user_constraints['reagent_eq_range'] or (0.8, 5.0)
             parameters.append(NumericalContinuousParameter(name="Reagent_Equivalents", bounds=reagent_eq_bounds))
 
+        # STARTING MATERIALS: Check for structured constraints
         if (user_constraints.get('starting_materials') and
             isinstance(user_constraints['starting_materials'], list) and
             all(isinstance(sm, dict) and 'smiles' in sm and 'eq_range' in sm for sm in user_constraints['starting_materials'])):
@@ -879,20 +920,20 @@ def run_true_bayesian_optimization(
             logger.info("Detected structured starting material constraints. Creating numerical parameters.")
             for sm_info in user_constraints['starting_materials']:
                 sm_smiles = sm_info['smiles']
-                # Sanitize SMILES for valid parameter name
                 sanitized_smiles = "".join(c for c in sm_smiles if c.isalnum())
                 param_name = f"Starting_Material_{sanitized_smiles}_Equivalents"
                 bounds = tuple(sm_info['eq_range'])
                 parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
                 logger.info(f"Added numerical parameter for Starting Material '{sm_smiles}' with bounds {bounds}")
             
-        # Check for the new structured format for catalysts
-        # Expected format: constraints['catalysts'] = [{'smiles': '...', 'mol_percent_range': [min, max]}, ...]
+        # CATALYSTS: Check for structured constraints
         if (user_constraints.get('catalysts') and 
             isinstance(user_constraints['catalysts'], list) and 
             all(isinstance(c, dict) and 'smiles' in c and 'mol_percent_range' in c for c in user_constraints['catalysts'])):
 
             logger.info("Detected structured catalyst constraints. Creating numerical parameters.")
+            use_substance_params['catalysts'] = False
+            
             for catalyst_info in user_constraints['catalysts']:
                 catalyst_smiles = catalyst_info['smiles']
                 sanitized_smiles = "".join(c for c in catalyst_smiles if c.isalnum())
@@ -901,21 +942,44 @@ def run_true_bayesian_optimization(
                 parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
                 logger.info(f"Added numerical parameter for Catalyst '{catalyst_smiles}' with bounds {bounds}")
         else:
-            # Fallback to original categorical logic
+            # Use SubstanceParameter with chemical encoding
             if len(final_catalysts) > 1:
-                parameters.append(CategoricalParameter(name="Catalyst", values=final_catalysts, encoding="OHE"))
+                catalyst_smiles_dict = {f"Catalyst_{i}": smiles 
+                                        for i, smiles in enumerate(final_catalysts) 
+                                        if smiles.lower() != "none"}
+                parameters.append(
+                    SubstanceParameter(
+                        name="Catalyst",
+                        data=catalyst_smiles_dict,
+                        encoding="MORDRED",
+                        decorrelate=True
+                    )
+                )
+                logger.info(f"Created SubstanceParameter for Catalyst with MORDRED encoding ({len(final_catalysts)} options)")
+            
             catalyst_mol_percent_bounds = user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
             parameters.append(NumericalContinuousParameter(name="Catalyst_mol_percent", bounds=catalyst_mol_percent_bounds))
 
-        # Unmodified parameters
+        # SOLVENTS: Always use SubstanceParameter unless explicitly constrained to single solvent
         if len(final_solvents) > 1:
-            parameters.append(CategoricalParameter(name="Solvent", values=final_solvents, encoding="OHE"))
+            solvent_smiles_dict = {f"Solvent_{i}": smiles for i, smiles in enumerate(final_solvents)}
+            parameters.append(
+                SubstanceParameter(
+                    name="Solvent",
+                    data=solvent_smiles_dict,
+                    encoding="MORDRED",
+                    decorrelate=True
+                )
+            )
+            logger.info(f"Created SubstanceParameter for Solvent with MORDRED encoding ({len(final_solvents)} options)")
             
+        # TEMPERATURE
         parameters.append(NumericalContinuousParameter(
             name="Temperature",
             bounds=(temp_min, temp_max)
         ))
 
+        # ADDITIONAL REACTANT EQUIVALENTS
         if num_reactants > 1:
             for i in range(1, num_reactants):
                 param_name = f"Reactant_{i+1}_Equivalents"
@@ -924,28 +988,66 @@ def run_true_bayesian_optimization(
                 parameters.append(NumericalContinuousParameter(name=param_name, bounds=bounds))
                 logger.info(f"Added dynamic parameter: {param_name} with bounds {bounds}")
 
-
         searchspace = SearchSpace.from_product(parameters)
-        logger.info(f"Created DYNAMIC mixed search space with {len(parameters)} parameters")
+        logger.info(f"Created CHEMISTRY-AWARE search space with {len(parameters)} parameters")
 
     except Exception as e:
-        logger.error(f"Error creating dynamic search space: {e}", exc_info=True)
+        logger.error(f"Error creating chemistry-aware search space: {e}", exc_info=True)
         return {"error": f"Failed to create BayBE search space: {e}"}
 
-    # ENHANCED Phase 1: Random Exploration with Batch Sampling
-    logger.info(f"Phase 1: Batch random exploration ({num_random_init} iterations)")
-    random_campaign = create_bayesian_campaign(searchspace, use_random_for_initial=True, batch_size=initial_batch_size)
-    if random_campaign is None:
-        return {"error": "Failed to create random exploration campaign"}
+    # ========================================================================
+    # PHASE 1: INITIAL SAMPLING WITH FPS
+    # ========================================================================
+    logger.info(f"Phase 1: FPS-based initial sampling ({num_random_init} iterations)")
+    
+    # Create TwoPhaseMetaRecommender for better initial sampling
+    # initial_recommender = FPSRecommender()
+    initial_recommender = RandomRecommender()
+    bayesian_recommender = BotorchRecommender()
 
+    meta_recommender = TwoPhaseMetaRecommender(
+        initial_recommender=initial_recommender,
+        recommender=bayesian_recommender,
+        switch_after=num_random_init  # Switch after initial random phase
+    )   
+
+    target = NumericalTarget(name="Yield", mode="MAX", bounds=(0, 100))
+    objective = SingleTargetObjective(target)
+    campaign = Campaign(searchspace, objective, meta_recommender)
+    
     optimization_history = []
     current_best_yield = 0.0
     
-    # Random exploration with batch evaluation
+    # Helper function to extract SMILES from SubstanceParameter recommendations
+    def get_smiles_from_substance_param(param_name: str, param_value: Any, searchspace: SearchSpace) -> str:
+        """
+        Extract actual SMILES string from SubstanceParameter recommendation.
+        BayBE returns the dictionary KEY, we need to look up the VALUE (SMILES).
+        """
+        try:
+            # Find the parameter in searchspace
+            param = next((p for p in searchspace.parameters if p.name == param_name), None)
+            
+            if param and hasattr(param, 'data'):
+                # param_value is something like "Solvent_0"
+                # param.data is {"Solvent_0": "C1CCOC1", "Solvent_1": "ClCCl", ...}
+                if param_value in param.data:
+                    return param.data[param_value]
+            
+            # Fallback: check if it's already a valid SMILES
+            if is_valid_smiles(param_value):
+                return param_value
+                
+        except Exception as e:
+            logger.debug(f"Error extracting SMILES for {param_name}={param_value}: {e}")
+        
+        return "None"
+
+    # Random/FPS exploration with batch evaluation
     for i in range(num_random_init):
         try:
-            batch_size = min(initial_batch_size, max(1, (num_random_init - i)))  # Reduce batch size near end
-            recommendations = random_campaign.recommend(batch_size=batch_size)
+            batch_size = min(initial_batch_size, max(1, (num_random_init - i)))
+            recommendations = campaign.recommend(batch_size=batch_size)
             
             if recommendations.empty:
                 logger.warning(f"No recommendations at iteration {i+1}")
@@ -956,200 +1058,11 @@ def run_true_bayesian_optimization(
             
             # Evaluate entire batch
             for idx, (_, rec) in enumerate(recommendations.iterrows()):
-                reagent_equivalents = 1.0
-                catalyst_mol_per = 1.0
                 temp = rec['Temperature']
-                solvent = rec.get('Solvent', final_solvents[0])
-                reagent = rec.get('Reagent', final_reagents[0])
-                sm_parts = []
-                sm_eq_parts = []
-                condition_dict = {'solvent': solvent}
-                reagent_parts = []
-                reagent_eq_parts = []
-                catalyst_parts = []
-                catalyst_mol_per_parts = []
                 
-                # Check for structured numerical parameters first
-                for param_name, value in rec.items():
-                    if param_name.startswith('Reagent_') and param_name.endswith('_Equivalents'):
-                        # This logic assumes the original SMILES is recoverable from the param name.
-                        # This is a limitation of this approach but sufficient for many cases.
-                        # A more robust system might store a mapping, but this is a minimal change.
-                        reagent_constraints = user_constraints.get('reagents') or []
-                        original_smiles = next((r['smiles'] for r in reagent_constraints if "".join(c for c in r['smiles'] if c.isalnum()) in param_name), None)
-                        if original_smiles:
-                            reagent_parts.append(original_smiles)
-                            reagent_eq_parts.append(str(round(float(value), 3)))
-                    elif param_name.startswith('Starting_Material_') and param_name.endswith('_Equivalents'):
-                        sm_constraints = user_constraints.get('starting_materials') or []
-                        original_smiles = next((sm['smiles'] for sm in sm_constraints if "".join(c for c in sm['smiles'] if c.isalnum()) in param_name), None)
-                        if original_smiles:
-                            sm_parts.append(original_smiles)
-                            sm_eq_parts.append(str(round(float(value), 3)))
-                    elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
-                        catalyst_constraints = user_constraints.get('catalysts') or []
-                        original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
-                        if original_smiles:
-                            catalyst_parts.append(original_smiles)
-                            catalyst_mol_per_parts.append(str(round(float(value), 3)))
-
-                # Fallback to categorical if structured params weren't found
-                if not reagent_parts and 'Reagent' in rec:
-                    reagent = rec.get('Reagent', 'None')
-                    reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
-                    if reagent != "None":
-                        condition_dict['reagent'] = reagent
-                        condition_dict['reagent_eq'] = reagent_equivalents
-                elif reagent_parts:
-                    condition_dict['reagent'] = ".".join(reagent_parts)
-                    condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
-
-                if sm_parts:
-                    # Creating new keys for starting materials, assuming merge_reaction_with_conditions can handle them.
-                    condition_dict['starting_material'] = ".".join(sm_parts)
-                    condition_dict['starting_material_eq'] = ",".join(sm_eq_parts)
-
-                if not catalyst_parts and 'Catalyst' in rec:
-                    catalyst = rec.get('Catalyst', 'None')
-                    catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
-                    if catalyst != "None":
-                        condition_dict['catalyst'] = catalyst
-                        condition_dict['catalyst_mol_per'] = catalyst_mol_per
-                elif catalyst_parts:
-                    condition_dict['catalyst'] = ".".join(catalyst_parts)
-                    condition_dict['catalyst_mol_per'] = ",".join(catalyst_mol_per_parts)
-                    
-                if num_reactants > 1:
-                    for i in range(1, num_reactants):
-                        param_name = f"Reactant_{i+1}_Equivalents"
-                        condition_dict[param_name] = round(float(rec.get(param_name, 1.0)), 3)
+                # Extract SMILES from SubstanceParameters using the helper function
+                solvent = get_smiles_from_substance_param('Solvent', rec.get('Solvent'), searchspace)
                 
-                full_reaction_smiles = merge_reaction_with_conditions(naked_reaction_smiles, condition_dict)
-                yield_value = safe_predict_yield(oracle, full_reaction_smiles)
-                batch_yields.append(yield_value)
-                
-                current_best_yield = max(current_best_yield, yield_value)
-                
-                
-                optimization_history.append({
-                    "iteration": i + 1,
-                    "batch_index": idx,
-                    "phase": "random_exploration",
-                    "conditions": {
-                        "Temperature": round(float(temp), 2),
-                        "Solvent": solvent,
-                        "Reagent": reagent,
-                        "Catalyst": catalyst,
-                        "Reagent_Equivalents": reagent_equivalents,
-                        "Catalyst_mol_percent": catalyst_mol_per,
-                    },
-                    "yield": round(float(yield_value), 2)
-                })
-            
-            # Add all batch measurements at once
-            batch_measurements["Yield"] = batch_yields
-            random_campaign.add_measurements(batch_measurements)
-            
-            logger.info(f"BATCH RANDOM {i+1}/{num_random_init} | "
-                       f"Batch size: {len(batch_yields)} | "
-                       f"Best in batch: {max(batch_yields):.2f}% | "
-                       f"Overall best: {current_best_yield:.2f}%")
-            
-        except Exception as e:
-            logger.warning(f"Random batch iteration {i+1} failed: {e}")
-            continue
-
-    # ENHANCED Phase 2: Adaptive Bayesian Optimization
-    if len(optimization_history) < 2:
-        return {"error": "Insufficient random samples for Bayesian optimization"}
-    
-    logger.info(f"Phase 2: Adaptive Bayesian optimization ({num_iterations - num_random_init} iterations)")
-    
-    # Start with initial acquisition strategy
-    current_acquisition = "EI"
-    current_batch_size = 1
-    
-    bayesian_campaign = create_bayesian_campaign(searchspace, use_random_for_initial=False, 
-                                                acquisition_type=current_acquisition, batch_size=current_batch_size)
-    if bayesian_campaign is None:
-        return {"error": "Failed to create Bayesian campaign"}
-    
-    # Transfer data
-    try:
-        if hasattr(random_campaign, 'measurements') and not random_campaign.measurements.empty:
-            bayesian_campaign.add_measurements(random_campaign.measurements)
-            logger.info(f"Transferred {len(random_campaign.measurements)} random samples")
-    except Exception as e:
-        logger.warning(f"Failed to transfer measurements: {e}")
-
-    # Add prior knowledge data points if provided
-    if prior_knowledge and 'data_points' in prior_knowledge and prior_knowledge['data_points']:
-        logger.info(f"Adding {len(prior_knowledge['data_points'])} prior data points to the campaign.")
-        try:
-            prior_data_list = []
-            for point in prior_knowledge['data_points']:
-                row = point['conditions'].copy()
-                row['Yield'] = point['yield']
-                prior_data_list.append(row)
-            
-            # Ensure all required columns are present, filling with 'None' if necessary
-            for param in searchspace.continuous.keys():
-                for row in prior_data_list:
-                    row.setdefault(param, np.nan)
-            for param in searchspace.categorical.keys():
-                 for row in prior_data_list:
-                    row.setdefault(param, "None") # A reasonable default
-
-            prior_df = pd.DataFrame(prior_data_list)
-            
-            # Add these known data points to the campaign
-            bayesian_campaign.add_measurements(prior_df)
-            logger.info("Successfully added prior data points.")
-            
-            # Also add to history for tracking
-            for i, row in prior_df.iterrows():
-                optimization_history.append({
-                    "iteration": 0, "batch_index": i, "phase": "prior_knowledge",
-                    "conditions": {k: v for k, v in row.items() if k != 'Yield'},
-                    "yield": row['Yield']
-                })
-                current_best_yield = max(current_best_yield, row['Yield'])
-
-        except Exception as e:
-            logger.error(f"Failed to add prior data points: {e}", exc_info=True)
-    
-    # Adaptive Bayesian optimization phase
-    for i in range(num_random_init, num_iterations):
-        try:
-            # Adaptive strategy selection
-            if use_adaptive_strategy:
-                new_acquisition, new_batch_size = get_adaptive_acquisition_strategy(
-                    i - num_random_init + 1, num_iterations - num_random_init, current_best_yield
-                )
-                if new_acquisition != current_acquisition or new_batch_size != current_batch_size:
-                    logger.info(f"Switching to {new_acquisition} with batch_size={new_batch_size}")
-                    bayesian_campaign = switch_to_bayesian_recommender(
-                        bayesian_campaign, new_acquisition, new_batch_size
-                    )
-                    current_acquisition = new_acquisition
-                    current_batch_size = new_batch_size
-            
-            # Get recommendations
-            recommendations = bayesian_campaign.recommend(batch_size=current_batch_size)
-            
-            if recommendations.empty:
-                logger.warning(f"No recommendations at iteration {i+1}")
-                continue
-            
-            batch_yields = []
-            batch_measurements = recommendations.copy()
-            
-            # Evaluate batch
-            for idx, (_, rec) in enumerate(recommendations.iterrows()):
-                reagent_equivalents = 1.0
-                catalyst_mol_per = 1.0
-                temp = rec['Temperature']
-                solvent = rec.get('Solvent', final_solvents[0])
                 condition_dict = {'solvent': solvent}
                 reagent_parts = []
                 reagent_eq_parts = []
@@ -1160,33 +1073,66 @@ def run_true_bayesian_optimization(
                 
                 # Check for structured numerical parameters first
                 for param_name, value in rec.items():
+                    # For reagents
                     if param_name.startswith('Reagent_') and param_name.endswith('_Equivalents'):
-                        # This logic assumes the original SMILES is recoverable from the param name.
-                        # This is a limitation of this approach but sufficient for many cases.
-                        # A more robust system might store a mapping, but this is a minimal change.
                         reagent_constraints = user_constraints.get('reagents') or []
-                        original_smiles = next((r['smiles'] for r in reagent_constraints if "".join(c for c in r['smiles'] if c.isalnum()) in param_name), None)
+                        original_smiles = None
+                        for r in reagent_constraints:
+                            if isinstance(r, dict) and 'smiles' in r:
+                                if "".join(ch for ch in r['smiles'] if ch.isalnum()) in param_name:
+                                    original_smiles = r['smiles']
+                                    break
+                            elif isinstance(r, str):
+                                if "".join(ch for ch in r if ch.isalnum()) in param_name:
+                                    original_smiles = r
+                                    break
                         if original_smiles:
                             reagent_parts.append(original_smiles)
                             reagent_eq_parts.append(str(round(float(value), 3)))
+
+                    # For starting materials  
                     elif param_name.startswith('Starting_Material_') and param_name.endswith('_Equivalents'):
                         sm_constraints = user_constraints.get('starting_materials') or []
-                        original_smiles = next((sm['smiles'] for sm in sm_constraints if "".join(c for c in sm['smiles'] if c.isalnum()) in param_name), None)
+                        original_smiles = None
+                        for sm in sm_constraints:
+                            if isinstance(sm, dict) and 'smiles' in sm:
+                                if "".join(ch for ch in sm['smiles'] if ch.isalnum()) in param_name:
+                                    original_smiles = sm['smiles']
+                                    break
+                            elif isinstance(sm, str):
+                                if "".join(ch for ch in sm if ch.isalnum()) in param_name:
+                                    original_smiles = sm
+                                    break
                         if original_smiles:
                             sm_parts.append(original_smiles)
                             sm_eq_parts.append(str(round(float(value), 3)))
+                            
                     elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
                         catalyst_constraints = user_constraints.get('catalysts') or []
-                        original_smiles = next((c['smiles'] for c in catalyst_constraints if "".join(c for c in c['smiles'] if c.isalnum()) in param_name), None)
+                        
+                        # Handle both formats: list of dicts OR list of strings
+                        original_smiles = None
+                        for c in catalyst_constraints:
+                            if isinstance(c, dict) and 'smiles' in c:
+                                # Structured format: {'smiles': '...', 'mol_percent_range': [...]}
+                                if "".join(ch for ch in c['smiles'] if ch.isalnum()) in param_name:
+                                    original_smiles = c['smiles']
+                                    break
+                            elif isinstance(c, str):
+                                # Simple string format: just SMILES strings
+                                if "".join(ch for ch in c if ch.isalnum()) in param_name:
+                                    original_smiles = c
+                                    break
+                        
                         if original_smiles:
                             catalyst_parts.append(original_smiles)
                             catalyst_mol_per_parts.append(str(round(float(value), 3)))
 
-                # Fallback to categorical if structured params weren't found
+                # Fallback to SubstanceParameter if structured params weren't found
                 if not reagent_parts and 'Reagent' in rec:
-                    reagent = rec.get('Reagent', 'None')
+                    reagent = get_smiles_from_substance_param('Reagent', rec.get('Reagent'), searchspace)
                     reagent_equivalents = round(float(rec.get('Reagent_Equivalents', 1.0)), 3)
-                    if reagent != "None":
+                    if reagent.lower() != "none":
                         condition_dict['reagent'] = reagent
                         condition_dict['reagent_eq'] = reagent_equivalents
                 elif reagent_parts:
@@ -1194,14 +1140,13 @@ def run_true_bayesian_optimization(
                     condition_dict['reagent_eq'] = ",".join(reagent_eq_parts)
 
                 if sm_parts:
-                    # Creating new keys for starting materials, assuming merge_reaction_with_conditions can handle them.
                     condition_dict['starting_material'] = ".".join(sm_parts)
                     condition_dict['starting_material_eq'] = ",".join(sm_eq_parts)
 
                 if not catalyst_parts and 'Catalyst' in rec:
-                    catalyst = rec.get('Catalyst', 'None')
+                    catalyst = get_smiles_from_substance_param('Catalyst', rec.get('Catalyst'), searchspace)
                     catalyst_mol_per = round(float(rec.get('Catalyst_mol_percent', 1.0)), 3)
-                    if catalyst != "None":
+                    if catalyst.lower() != "none":
                         condition_dict['catalyst'] = catalyst
                         condition_dict['catalyst_mol_per'] = catalyst_mol_per
                 elif catalyst_parts:
@@ -1209,45 +1154,57 @@ def run_true_bayesian_optimization(
                     condition_dict['catalyst_mol_per'] = ",".join(catalyst_mol_per_parts)
                     
                 if num_reactants > 1:
-                    for i in range(1, num_reactants):
-                        param_name = f"Reactant_{i+1}_Equivalents"
+                    for j in range(1, num_reactants):
+                        param_name = f"Reactant_{j+1}_Equivalents"
                         condition_dict[param_name] = round(float(rec.get(param_name, 1.0)), 3)
                 
                 full_reaction_smiles = merge_reaction_with_conditions(naked_reaction_smiles, condition_dict)
-                yield_value = safe_predict_yield(oracle, full_reaction_smiles)
-                batch_yields.append(yield_value)
                 
+                logger.info(f"Iteration {i+1}.{idx+1}: {condition_dict}")
+                
+                if not full_reaction_smiles:
+                    logger.warning(f"Failed to merge conditions, using 0 yield")
+                    yield_value = 0.0
+                else:
+                    yield_value = safe_predict_yield(oracle, full_reaction_smiles)
+                    
+                batch_yields.append(yield_value)
                 current_best_yield = max(current_best_yield, yield_value)
                 
-                optimization_history.append({
+                # Store results - use actual SMILES not labels
+                hist_entry = {
                     "iteration": i + 1,
                     "batch_index": idx,
                     "phase": "bayesian_optimization",
-                    "acquisition_function": current_acquisition,
+                    "acquisition_function": "BotorchDefault",
                     "conditions": {
                         "Temperature": round(float(temp), 2),
                         "Solvent": solvent,
-                        "Reagent": reagent,
-                        "Catalyst": catalyst,
-                        "Reagent_Equivalents": reagent_equivalents,
-                        "Catalyst_mol_percent": catalyst_mol_per,
+                        "Reagent": condition_dict.get('reagent', 'None'),
+                        "Catalyst": condition_dict.get('catalyst', 'None'),
+                        "Reagent_Equivalents": condition_dict.get('reagent_eq', 0),
+                        "Catalyst_mol_percent": condition_dict.get('catalyst_mol_per', 0),
                     },
                     "yield": round(float(yield_value), 2)
-                })
+                }
+                
+                optimization_history.append(hist_entry)
             
             # Add measurements
             batch_measurements["Yield"] = batch_yields
-            bayesian_campaign.add_measurements(batch_measurements)
+            campaign.add_measurements(batch_measurements)
             
-            logger.info(f"BAYESIAN {i+1-num_random_init}/{num_iterations-num_random_init} | "
-                       f"{current_acquisition} batch={len(batch_yields)} | "
-                       f"Best: {max(batch_yields):.2f}% | Overall: {current_best_yield:.2f}%")
+            logger.info(f"Iteration {i+1}/{num_random_init} | "
+                f"batch={len(batch_yields)} | "
+                f"Best: {max(batch_yields):.2f}% | Overall: {current_best_yield:.2f}%")
             
         except Exception as e:
-            logger.warning(f"Bayesian iteration {i+1} failed: {e}")
+            logger.error(f"Bayesian iteration {i+1} failed: {e}", exc_info=True)
             continue
 
-    # Enhanced results processing
+    # ========================================================================
+    # ENHANCED RESULTS PROCESSING
+    # ========================================================================
     if not optimization_history:
         return {"error": "No successful optimization iterations"}
     
@@ -1255,7 +1212,7 @@ def run_true_bayesian_optimization(
         best_result = max(optimization_history, key=lambda x: x['yield'])
         
         # Calculate metrics per acquisition function
-        acq_functions_used = list(set(h.get('acquisition_function', 'Random') for h in optimization_history))
+        acq_functions_used = list(set(h.get('acquisition_function', 'FPS') for h in optimization_history))
         acq_performance = {}
         
         for acq_func in acq_functions_used:
@@ -1267,14 +1224,13 @@ def run_true_bayesian_optimization(
                     "evaluations": len(acq_yields)
                 }
         
-        random_yields = [h['yield'] for h in optimization_history if h['phase'] == 'random_exploration']
+        initial_yields = [h['yield'] for h in optimization_history if h['phase'] == 'initial_sampling']
         bayesian_yields = [h['yield'] for h in optimization_history if h['phase'] == 'bayesian_optimization']
 
-        # --- LLM analysis ---
+        # LLM analysis
         improvement_suggestions = "LLM analysis was not available or failed."
         if LLM_AVAILABLE:
             try:
-                # Create a concise summary of the history for the prompt
                 best_cond_dict = best_result['conditions']
                 best_conditions_str = (
                     f"- **Temperature:** {best_cond_dict.get('Temperature', 'N/A')}°C\n"
@@ -1283,10 +1239,8 @@ def run_true_bayesian_optimization(
                     f"- **Catalyst:** {best_cond_dict.get('Catalyst', 'N/A')}"
                 )
 
-                # Create a concise summary of the history for the prompt
                 history_df = pd.DataFrame([h['conditions'] for h in optimization_history])
                 history_df['yield'] = [h['yield'] for h in optimization_history]
-                # Select a diverse and informative subset of the history
                 history_summary_df = pd.concat([
                     history_df.head(5), 
                     history_df.nlargest(5, 'yield'),
@@ -1297,7 +1251,7 @@ def run_true_bayesian_optimization(
                     "analyze_bo_results",
                     "task_specific_prompts.yaml",
                     reaction_smiles=naked_reaction_smiles,
-                    best_conditions_str=best_conditions_str, # Pass the formatted string
+                    best_conditions_str=best_conditions_str,
                     max_yield=best_result['yield'],
                     history_summary=history_summary_df
                 )
@@ -1315,13 +1269,12 @@ def run_true_bayesian_optimization(
             except Exception as llm_e:
                 logger.error(f"LLM analysis step failed: {llm_e}", exc_info=True)
                 improvement_suggestions = f"An error occurred during LLM analysis: {llm_e}"
-        # --- END OF NEW LLM ANALYSIS STEP ---
         
         # Construct the final result object
         final_result = {
             "best_conditions": best_result['conditions'],
             "max_yield": best_result['yield'],
-            "improvement_suggestions": improvement_suggestions, # NEW KEY
+            "improvement_suggestions": improvement_suggestions,
             "optimization_history": optimization_history,
             "search_space_summary": {
                 "solvents": final_solvents,
@@ -1329,7 +1282,12 @@ def run_true_bayesian_optimization(
                 "catalysts": final_catalysts,
                 "temperature_range": [round(temp_min, 1), round(temp_max, 1)],
                 "reagent_eq_range": user_constraints['reagent_eq_range'] or (0.8, 5.0),
-                "catalyst_mol_percent_range": user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0)
+                "catalyst_mol_percent_range": user_constraints['catalyst_mol_percent_range'] or (0.1, 10.0),
+                "chemistry_aware_encoding": {
+                    "solvents": "MORDRED" if use_substance_params['solvents'] else "Structured",
+                    "reagents": "RDKIT" if use_substance_params['reagents'] else "Structured",
+                    "catalysts": "MORDRED" if use_substance_params['catalysts'] else "Structured"
+                }
             },
             "constraints_applied": {
                 "temperature_constrained": user_constraints['temperature_range'] is not None,
@@ -1338,7 +1296,7 @@ def run_true_bayesian_optimization(
                 "starting_materials_constrained": user_constraints['starting_materials'] is not None,
                 "catalysts_constrained": user_constraints['catalysts'] is not None,
                 "reagent_eq_range": user_constraints['reagent_eq_range'] is not None,
-                "catalyst_mol_percent_range":user_constraints['catalyst_mol_percent_range'] is not None,
+                "catalyst_mol_percent_range": user_constraints['catalyst_mol_percent_range'] is not None,
                 "user_constraints": user_constraints
             },
             "rxn_insight_analysis": {
@@ -1353,13 +1311,21 @@ def run_true_bayesian_optimization(
             },
             "performance_metrics": {
                 "total_evaluations": len(optimization_history),
-                "random_phase_evaluations": len(random_yields),
+                "initial_phase_evaluations": len(initial_yields),
                 "bayesian_phase_evaluations": len(bayesian_yields),
-                "avg_random_yield": round(np.mean(random_yields), 2) if random_yields else 0,
+                "avg_initial_yield": round(np.mean(initial_yields), 2) if initial_yields else 0,
                 "avg_bayesian_yield": round(np.mean(bayesian_yields), 2) if bayesian_yields else 0,
                 "acquisition_performance": acq_performance,
-                "improvement_over_random": round(np.mean(bayesian_yields) - np.mean(random_yields), 2) if bayesian_yields and random_yields else 0,
-                "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}"
+                "improvement_over_initial": round(np.mean(bayesian_yields) - np.mean(initial_yields), 2) if bayesian_yields and initial_yields else 0,
+                "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}",
+                "adaptive_acquisition": "enabled" if use_adaptive_strategy else "disabled",
+                "chemistry_aware_descriptors": "enabled"
+            },
+            "uncertainty_quantification": {
+                # "final_uncertainty_estimate": uncertainty_estimate,
+                "final_uncertainty_estimate": None,
+                "best_result_has_uncertainty": 'uncertainty_metrics' in best_result,
+                "uncertainty_tracked": any('uncertainty_metrics' in h for h in optimization_history)
             }
         }
         return final_result
