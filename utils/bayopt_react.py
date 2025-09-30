@@ -21,6 +21,9 @@ from baybe.recommenders import (
     FPSRecommender
 )
 from baybe.surrogates import GaussianProcessSurrogate
+from scipy.stats import norm
+from scipy.spatial.distance import cdist
+import math
 
 from rxn_insight.reaction import Reaction
 from utils.llm_interface import generate_text
@@ -44,6 +47,18 @@ except ImportError:
     from utils.yield_optimizer import AdvancedYieldPredictor, merge_reaction_with_conditions
 
 ORACLE = None
+
+def sanitize_for_json(obj):
+    """Recursively replace NaN and Inf values with None for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    return obj
 
 def is_valid_smiles(smiles: str) -> bool:
     """Validate if a string is valid SMILES"""
@@ -404,19 +419,146 @@ def get_rxn_insight_conditions(naked_reaction_smiles: str, n_conditions: int = 2
 def get_adaptive_batch_size(
     iteration: int, 
     total_iterations: int, 
-    current_best_yield: float
+    current_best_yield: float,
+    remaining_budget: int,
+    recent_improvements: List[float]
 ) -> int:
     """
-    Determine batch size based on optimization phase.
+    Budget-aware adaptive batch sizing with exploration-exploitation balance.
+    
+    Args:
+        iteration: Current iteration number
+        total_iterations: Total planned iterations
+        current_best_yield: Best yield found so far
+        remaining_budget: Number of evaluations remaining in budget
+        recent_improvements: List of yield improvements in recent iterations
+        
+    Returns:
+        Optimal batch size for current iteration
     """
     progress = iteration / max(total_iterations, 1)
     
-    if progress < 0.3:
-        return 3  # Early exploration
-    elif progress < 0.7:
-        return 2 if current_best_yield < 60 else 1
+    # Calculate recent improvement trend
+    if len(recent_improvements) >= 3:
+        avg_recent_improvement = np.mean(recent_improvements[-3:])
+        improvement_trend = avg_recent_improvement > 1.0  # >1% improvement
     else:
-        return 1  # Late exploitation
+        improvement_trend = True  # Assume positive in early stages
+    
+    # Base batch size on phase
+    if progress < 0.2:
+        # Early exploration: larger batches
+        base_batch = 3
+    elif progress < 0.5:
+        # Mid exploration-exploitation
+        base_batch = 2
+    elif progress < 0.8:
+        # Late exploitation
+        base_batch = 1 if current_best_yield > 70 else 2
+    else:
+        # Final refinement
+        base_batch = 1
+    
+    # Adjust based on yield performance
+    if current_best_yield < 30:
+        # Poor performance: increase exploration
+        base_batch = min(base_batch + 1, 4)
+    elif current_best_yield > 80:
+        # Excellent performance: focus exploitation
+        base_batch = 1
+    
+    # Adjust based on improvement trend
+    if not improvement_trend and progress > 0.3:
+        # Stagnation: try larger batches for diversity
+        base_batch = min(base_batch + 1, 3)
+    
+    # Budget constraint: ensure we don't exceed remaining budget
+    iterations_remaining = max(1, total_iterations - iteration)
+    max_sustainable_batch = max(1, remaining_budget // iterations_remaining)
+    
+    # Conservative buffer for final iterations
+    if progress > 0.9:
+        max_sustainable_batch = min(max_sustainable_batch, remaining_budget)
+    
+    final_batch = min(base_batch, max_sustainable_batch, remaining_budget)
+    
+    logger.info(f"Adaptive batch: base={base_batch}, budget_limit={max_sustainable_batch}, "
+                f"final={final_batch} (budget remaining: {remaining_budget})")
+    
+    return max(1, final_batch)
+
+def enforce_diversity_constraint(
+    recommendations: pd.DataFrame,
+    campaign: Campaign,
+    min_distance_threshold: float = 0.15,
+    max_attempts: int = 10
+) -> pd.DataFrame:
+    """
+    Enforce diversity in recommendations by rejecting points too similar to existing data.
+    
+    Args:
+        recommendations: Candidate recommendations from campaign
+        campaign: BayBE campaign with measurement history
+        min_distance_threshold: Minimum normalized distance required (0-1)
+        max_attempts: Maximum re-sampling attempts
+        
+    Returns:
+        Diversified recommendations DataFrame
+    """
+    if not hasattr(campaign, 'measurements') or campaign.measurements.empty:
+        return recommendations
+    
+    try:
+        from scipy.spatial.distance import cdist
+        from baybe.utils.dataframe import to_tensor
+        
+        # Transform existing measurements to model space
+        existing_data = campaign.measurements.drop(columns=['Yield'], errors='ignore')
+        X_existing = campaign.searchspace.transform(existing_data)
+        X_existing_array = to_tensor(X_existing).numpy()
+        
+        diverse_recs = []
+        attempts = 0
+        
+        for idx, (_, rec) in enumerate(recommendations.iterrows()):
+            rec_df = pd.DataFrame([rec])
+            X_rec = campaign.searchspace.transform(rec_df)
+            X_rec_array = to_tensor(X_rec).numpy()
+            
+            # Calculate minimum distance to existing points
+            distances = cdist(X_rec_array, X_existing_array, metric='euclidean')
+            min_distance = distances.min()
+            
+            # Normalize by feature space dimensionality
+            normalized_distance = min_distance / np.sqrt(X_existing_array.shape[1])
+            
+            if normalized_distance >= min_distance_threshold or attempts >= max_attempts:
+                diverse_recs.append(rec)
+                # Add this point to existing data for next comparisons
+                X_existing_array = np.vstack([X_existing_array, X_rec_array])
+            else:
+                logger.debug(f"Recommendation {idx} too similar (distance={normalized_distance:.3f}), "
+                            f"threshold={min_distance_threshold}")
+                attempts += 1
+                
+                # Request replacement recommendation
+                try:
+                    new_rec = campaign.recommend(batch_size=1)
+                    if not new_rec.empty:
+                        diverse_recs.append(new_rec.iloc[0])
+                        X_new = campaign.searchspace.transform(new_rec)
+                        X_existing_array = np.vstack([X_existing_array, to_tensor(X_new).numpy()])
+                except:
+                    # Fallback: keep original if re-sampling fails
+                    diverse_recs.append(rec)
+        
+        result = pd.DataFrame(diverse_recs)
+        logger.info(f"Diversity enforcement: {len(recommendations)} -> {len(result)} unique recommendations")
+        return result
+        
+    except Exception as e:
+        logger.warning(f"Diversity constraint failed: {e}, returning original recommendations")
+        return recommendations
 
 
 def create_adaptive_recommender(phase_config: Dict[str, Any]) -> BotorchRecommender:
@@ -467,14 +609,13 @@ def switch_to_bayesian_recommender_advanced(campaign: Campaign, batch_size: int 
         logger.warning(f"Failed to switch to Bayesian recommender: {e}")
         return campaign
 
-
 def analyze_recommendations_with_uncertainty(
     campaign: Campaign, 
     recommendations: pd.DataFrame,
     current_best: float
 ) -> List[Dict[str, Any]]:
     """
-    Provide uncertainty metrics for each recommendation.
+    Provide Gaussian Process-based uncertainty metrics for each recommendation.
     
     Returns:
         List of dicts containing uncertainty metrics for each recommendation
@@ -482,77 +623,121 @@ def analyze_recommendations_with_uncertainty(
     uncertainty_analysis = []
     
     try:
-        # Check if campaign has a surrogate model we can query
+        # Access the surrogate model from the campaign
         if not hasattr(campaign, 'recommender'):
             return [{"error": "No recommender available"} for _ in range(len(recommendations))]
         
         recommender = campaign.recommender
         
-        # Try to get posterior predictions from the surrogate
+        # Handle TwoPhaseMetaRecommender
+        if hasattr(recommender, 'recommender'):
+            actual_recommender = recommender.recommender
+        else:
+            actual_recommender = recommender
+            
+        # Check if we have a Gaussian Process surrogate
+        has_gp_surrogate = (
+            hasattr(actual_recommender, 'surrogate_model') and
+            actual_recommender.surrogate_model is not None and
+            hasattr(campaign, 'measurements') and 
+            len(campaign.measurements) > 0
+        )
+        
+        if not has_gp_surrogate:
+            logger.debug("No GP surrogate available for uncertainty quantification")
+            return [{"error": "GP not available yet"} for _ in range(len(recommendations))]
+        
+        surrogate = actual_recommender.surrogate_model
+        
+        # Transform recommendations to the model's input space
+        from baybe.utils.dataframe import to_tensor
+        
         for idx, (_, rec) in enumerate(recommendations.iterrows()):
             try:
-                # Basic uncertainty metrics
+                # Convert recommendation to proper format
+                rec_df = pd.DataFrame([rec])
+                
+                # Transform to model space using campaign's searchspace
+                X_test = campaign.searchspace.transform(rec_df)
+                X_test_tensor = to_tensor(X_test)
+                
+                # Get GP posterior predictions
+                with torch.no_grad():
+                    posterior = surrogate._model.posterior(X_test_tensor)
+                    mean = posterior.mean.squeeze().item()
+                    variance = posterior.variance.squeeze().item()
+                    std = np.sqrt(variance)
+                
+                # De-normalize predictions if target is normalized
+                if hasattr(campaign.objective.targets[0], 'transformation'):
+                    # Assuming yield is in [0, 100] range
+                    predicted_mean = mean * 100
+                    predicted_std = std * 100
+                else:
+                    predicted_mean = mean
+                    predicted_std = std
+                
+                # Calculate confidence intervals
+                ci_95_lower = max(0, predicted_mean - 1.96 * predicted_std)
+                ci_95_upper = min(100, predicted_mean + 1.96 * predicted_std)
+                ci_68_lower = max(0, predicted_mean - predicted_std)
+                ci_68_upper = min(100, predicted_mean + predicted_std)
+                
+                # Calculate probability of improvement over current best
+                from scipy.stats import norm
+                if predicted_std > 1e-6:
+                    z_score = (predicted_mean - current_best) / predicted_std
+                    poi = float(norm.cdf(z_score))
+                else:
+                    poi = 1.0 if predicted_mean > current_best else 0.0
+                
+                # Calculate expected improvement
+                if predicted_std > 1e-6:
+                    improvement = predicted_mean - current_best
+                    z = improvement / predicted_std
+                    ei = improvement * norm.cdf(z) + predicted_std * norm.pdf(z)
+                else:
+                    ei = max(0, predicted_mean - current_best)
+                
+                # Coefficient of variation
+                cv = predicted_std / (abs(predicted_mean) + 1e-9)
+                
+                # Quality assessment based on uncertainty
+                if cv < 0.1 and predicted_std < 5.0:
+                    quality = 'high'
+                elif cv < 0.3 and predicted_std < 15.0:
+                    quality = 'medium'
+                else:
+                    quality = 'low'
+                
                 analysis = {
                     'conditions': rec.to_dict(),
-                    'predicted_yield_mean': None,
-                    'predicted_yield_std': None,
-                    'confidence_interval_95': None,
-                    'probability_of_improvement': None,
-                    'expected_improvement': None,
-                    'coefficient_of_variation': None,
-                    'recommendation_quality': 'medium'
+                    'predicted_yield_mean': round(float(predicted_mean), 2),
+                    'predicted_yield_std': round(float(predicted_std), 2),
+                    'confidence_interval_95': [round(ci_95_lower, 2), round(ci_95_upper, 2)],
+                    'confidence_interval_68': [round(ci_68_lower, 2), round(ci_68_upper, 2)],
+                    'probability_of_improvement': round(poi, 3),
+                    'expected_improvement': round(float(ei), 2),
+                    'coefficient_of_variation': round(cv, 3),
+                    'recommendation_quality': quality,
+                    'uncertainty_source': 'gaussian_process'
                 }
-                
-                # If we have measurements, calculate empirical uncertainty
-                if hasattr(campaign, 'measurements') and len(campaign.measurements) > 0:
-                    recent_yields = campaign.measurements['Yield'].tail(10)
-                    empirical_std = recent_yields.std()
-                    empirical_mean = recent_yields.mean()
-                    
-                    # Estimate uncertainty based on historical data
-                    analysis['predicted_yield_std'] = float(empirical_std)
-                    analysis['predicted_yield_mean'] = float(empirical_mean)
-                    
-                    # Calculate confidence interval
-                    ci_width = 1.96 * empirical_std
-                    analysis['confidence_interval_95'] = [
-                        max(0, empirical_mean - ci_width),
-                        min(100, empirical_mean + ci_width)
-                    ]
-                    
-                    # Coefficient of variation
-                    cv = empirical_std / (empirical_mean + 1e-9)
-                    analysis['coefficient_of_variation'] = float(cv)
-                    
-                    # Quality assessment
-                    if cv < 0.1:
-                        analysis['recommendation_quality'] = 'high'
-                    elif cv > 0.3:
-                        analysis['recommendation_quality'] = 'low'
-                    
-                    # Probability of improvement (simplified estimate)
-                    if empirical_std > 0:
-                        z_score = (empirical_mean - current_best) / empirical_std
-                        # Approximate using standard normal CDF
-                        from scipy.stats import norm
-                        poi = float(norm.cdf(z_score))
-                        analysis['probability_of_improvement'] = poi
                 
                 uncertainty_analysis.append(analysis)
                 
             except Exception as e:
-                logger.debug(f"Error analyzing recommendation {idx}: {e}")
+                logger.debug(f"Error in GP uncertainty for recommendation {idx}: {e}")
                 uncertainty_analysis.append({
                     'conditions': rec.to_dict(),
-                    'error': str(e)
+                    'error': str(e),
+                    'uncertainty_source': 'failed'
                 })
                 
     except Exception as e:
-        logger.warning(f"Uncertainty analysis failed: {e}")
-        return [{"error": str(e)} for _ in range(len(recommendations))]
+        logger.warning(f"GP uncertainty analysis failed: {e}")
+        return [{"error": str(e), "uncertainty_source": "failed"} for _ in range(len(recommendations))]
     
     return uncertainty_analysis
-
 
 def initialize_oracle() -> Optional[AdvancedYieldPredictor]:
     """
@@ -802,18 +987,36 @@ def run_true_bayesian_optimization(
         # TEMPERATURE: User constraints take absolute priority
         if user_constraints['temperature_range'] is not None:
             temp_min, temp_max = user_constraints['temperature_range']
+            # Validate user constraints
+            if temp_min >= temp_max:
+                logger.warning(f"Invalid user temperature range: {temp_min} >= {temp_max}. Swapping values.")
+                temp_min, temp_max = temp_max, temp_min
+            temp_min = max(-100.0, min(temp_min, 400.0))
+            temp_max = max(-100.0, min(temp_max, 400.0))
             logger.info(f"USING USER TEMPERATURE CONSTRAINTS: {temp_min}°C to {temp_max}°C")
         else:
             if model_temps:
                 model_temps = [t for t in model_temps if -100 <= t <= 400]
-                temp_min, temp_max = min(model_temps), max(model_temps)
-                if temp_max - temp_min < 10.0:
-                    temp_center = (temp_min + temp_max) / 2
-                    temp_min = max(0, temp_center - 25)
-                    temp_max = min(300, temp_center + 25)
+                if model_temps:
+                    temp_min, temp_max = min(model_temps), max(model_temps)
+                    # Ensure minimum range of 10°C
+                    if temp_max - temp_min < 10.0:
+                        temp_center = (temp_min + temp_max) / 2
+                        temp_min = max(-100, temp_center - 25)
+                        temp_max = min(400, temp_center + 25)
+                    # Clamp to physical limits
+                    temp_min = max(-100.0, temp_min)
+                    temp_max = min(400.0, temp_max)
+                else:
+                    temp_min, temp_max = 0.0, 200.0
             else:
-                temp_min, temp_max = -100.0, 200.0
+                temp_min, temp_max = 0.0, 200.0
             logger.info(f"USING MODEL-BASED TEMPERATURE RANGE: {temp_min:.1f}°C to {temp_max:.1f}°C")
+
+        # Final validation
+        if temp_min >= temp_max:
+            logger.error(f"Invalid final temperature range: [{temp_min}, {temp_max}]. Using safe default.")
+            temp_min, temp_max = 0.0, 200.0
             
         # Add "None" options for optional components if not constrained
         if "None" not in final_reagents:
@@ -999,9 +1202,8 @@ def run_true_bayesian_optimization(
     # PHASE 1: INITIAL SAMPLING WITH FPS
     # ========================================================================
     logger.info(f"Phase 1: FPS-based initial sampling ({num_random_init} iterations)")
-    
+
     # Create TwoPhaseMetaRecommender for better initial sampling
-    # initial_recommender = FPSRecommender()
     initial_recommender = RandomRecommender()
     bayesian_recommender = BotorchRecommender()
 
@@ -1014,10 +1216,14 @@ def run_true_bayesian_optimization(
     target = NumericalTarget(name="Yield", mode="MAX", bounds=(0, 100))
     objective = SingleTargetObjective(target)
     campaign = Campaign(searchspace, objective, meta_recommender)
-    
+
     optimization_history = []
     current_best_yield = 0.0
-    
+
+    # Initialize adaptive batching variables HERE (before the loop)
+    recent_improvements = []
+    remaining_budget = num_random_init * initial_batch_size  # Total budget estimate
+
     # Helper function to extract SMILES from SubstanceParameter recommendations
     def get_smiles_from_substance_param(param_name: str, param_value: Any, searchspace: SearchSpace) -> str:
         """
@@ -1046,8 +1252,34 @@ def run_true_bayesian_optimization(
     # Random/FPS exploration with batch evaluation
     for i in range(num_random_init):
         try:
-            batch_size = min(initial_batch_size, max(1, (num_random_init - i)))
+            # Calculate adaptive batch size with proper checks
+            if i > 0 and len(optimization_history) > 0:
+                # Calculate recent improvement safely
+                if len(optimization_history) >= 5:
+                    recent_yield_change = optimization_history[-1]['yield'] - optimization_history[-5]['yield']
+                else:
+                    recent_yield_change = optimization_history[-1]['yield'] - optimization_history[0]['yield']
+                recent_improvements.append(recent_yield_change)
+            
+            # Get adaptive batch size
+            batch_size = get_adaptive_batch_size(
+                iteration=i,
+                total_iterations=num_random_init,
+                current_best_yield=current_best_yield,
+                remaining_budget=max(1, remaining_budget),
+                recent_improvements=recent_improvements if recent_improvements else [0.0]
+            )
+            
             recommendations = campaign.recommend(batch_size=batch_size)
+            
+            # Apply diversity constraint (after initial phase)
+            if i >= num_random_init // 2:
+                recommendations = enforce_diversity_constraint(
+                    recommendations=recommendations,
+                    campaign=campaign,
+                    min_distance_threshold=0.12,
+                    max_attempts=5
+                )
             
             if recommendations.empty:
                 logger.warning(f"No recommendations at iteration {i+1}")
@@ -1110,16 +1342,13 @@ def run_true_bayesian_optimization(
                     elif param_name.startswith('Catalyst_') and param_name.endswith('_mol_percent'):
                         catalyst_constraints = user_constraints.get('catalysts') or []
                         
-                        # Handle both formats: list of dicts OR list of strings
                         original_smiles = None
                         for c in catalyst_constraints:
                             if isinstance(c, dict) and 'smiles' in c:
-                                # Structured format: {'smiles': '...', 'mol_percent_range': [...]}
                                 if "".join(ch for ch in c['smiles'] if ch.isalnum()) in param_name:
                                     original_smiles = c['smiles']
                                     break
                             elif isinstance(c, str):
-                                # Simple string format: just SMILES strings
                                 if "".join(ch for ch in c if ch.isalnum()) in param_name:
                                     original_smiles = c
                                     break
@@ -1194,6 +1423,9 @@ def run_true_bayesian_optimization(
             batch_measurements["Yield"] = batch_yields
             campaign.add_measurements(batch_measurements)
             
+            # Update remaining budget AFTER batch evaluation
+            remaining_budget -= len(batch_yields)
+            
             logger.info(f"Iteration {i+1}/{num_random_init} | "
                 f"batch={len(batch_yields)} | "
                 f"Best: {max(batch_yields):.2f}% | Overall: {current_best_yield:.2f}%")
@@ -1207,7 +1439,7 @@ def run_true_bayesian_optimization(
     # ========================================================================
     if not optimization_history:
         return {"error": "No successful optimization iterations"}
-    
+
     try:
         best_result = max(optimization_history, key=lambda x: x['yield'])
         
@@ -1226,6 +1458,35 @@ def run_true_bayesian_optimization(
         
         initial_yields = [h['yield'] for h in optimization_history if h['phase'] == 'initial_sampling']
         bayesian_yields = [h['yield'] for h in optimization_history if h['phase'] == 'bayesian_optimization']
+
+        # Calculate final uncertainty estimate for best result
+        uncertainty_estimate = None
+        best_uncertainty_metrics = None
+        
+        try:
+            # Get uncertainty for best conditions
+            best_conditions_df = pd.DataFrame([best_result['conditions']])
+            uncertainty_results = analyze_recommendations_with_uncertainty(
+                campaign=campaign,
+                recommendations=best_conditions_df,
+                current_best=current_best_yield
+            )
+            
+            if uncertainty_results and len(uncertainty_results) > 0 and 'error' not in uncertainty_results[0]:
+                best_uncertainty_metrics = uncertainty_results[0]
+                uncertainty_estimate = {
+                    "mean": best_uncertainty_metrics.get('predicted_yield_mean'),
+                    "std": best_uncertainty_metrics.get('predicted_yield_std'),
+                    "confidence_interval_95": best_uncertainty_metrics.get('confidence_interval_95'),
+                    "coefficient_of_variation": best_uncertainty_metrics.get('coefficient_of_variation'),
+                    "recommendation_quality": best_uncertainty_metrics.get('recommendation_quality'),
+                    "source": best_uncertainty_metrics.get('uncertainty_source', 'gaussian_process')
+                }
+                logger.info(f"Final uncertainty: mean={uncertainty_estimate['mean']:.2f}, "
+                        f"std={uncertainty_estimate['std']:.2f}, "
+                        f"quality={uncertainty_estimate['recommendation_quality']}")
+        except Exception as unc_e:
+            logger.warning(f"Could not calculate final uncertainty: {unc_e}")
 
         # LLM analysis
         improvement_suggestions = "LLM analysis was not available or failed."
@@ -1319,16 +1580,19 @@ def run_true_bayesian_optimization(
                 "improvement_over_initial": round(np.mean(bayesian_yields) - np.mean(initial_yields), 2) if bayesian_yields and initial_yields else 0,
                 "search_space_enhancement": f"rxn-insight {'enabled' if use_rxn_insight and RXN_INSIGHT_AVAILABLE else 'disabled'}",
                 "adaptive_acquisition": "enabled" if use_adaptive_strategy else "disabled",
-                "chemistry_aware_descriptors": "enabled"
+                "chemistry_aware_descriptors": "enabled",
+                "diversity_constraint": "enabled",
+                "adaptive_batching": "budget_aware"
             },
             "uncertainty_quantification": {
-                # "final_uncertainty_estimate": uncertainty_estimate,
-                "final_uncertainty_estimate": None,
-                "best_result_has_uncertainty": 'uncertainty_metrics' in best_result,
-                "uncertainty_tracked": any('uncertainty_metrics' in h for h in optimization_history)
+                "final_uncertainty_estimate": uncertainty_estimate,
+                "best_result_uncertainty_metrics": best_uncertainty_metrics,
+                "best_result_has_uncertainty": best_uncertainty_metrics is not None,
+                "uncertainty_tracked": any('uncertainty_metrics' in h for h in optimization_history),
+                "gp_based_uncertainty": uncertainty_estimate is not None and uncertainty_estimate.get('source') == 'gaussian_process'
             }
         }
-        return final_result
+        return sanitize_for_json(final_result)
         
     except Exception as e:
         logger.error(f"Error processing results: {e}", exc_info=True)
