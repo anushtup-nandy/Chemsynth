@@ -16,6 +16,7 @@ from urllib.parse import quote
 from utils.balance_reaction import balance_chemical_equation, count_atoms
 import re
 from collections import Counter
+import tempfile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -235,32 +236,83 @@ def validate_config_file(config_path: str) -> dict:
         return {"valid": False, "error": f"Error reading or validating config file: {str(e)}"}
 
 
+# def initialize_aizynthfinder(config_path: str) -> dict:
+#     """
+#     Initialize AiZynthFinder with proper error handling.
+#     Returns dict with 'finder' object and 'error' message if failed.
+#     """
+#     try:
+#         logger.info(f"Initializing AiZynthFinder with config: {config_path}")
+#         
+#         # Validate config first
+#         config_validation = validate_config_file(config_path)
+#         if not config_validation["valid"]:
+#             return {"finder": None, "error": config_validation["error"]}
+#         
+#         # Initialize AiZynthFinder
+#         # AiZynthFinder resolves paths inside the config file relative to the config file's location.
+#         finder = AiZynthFinder(configfile=config_path)
+#         
+#         logger.info("AiZynthFinder initialized successfully")
+#         return {"finder": finder, "error": None}
+#         
+#     except ImportError as e:
+#         return {"finder": None, "error": f"Missing required dependencies for AiZynthFinder: {str(e)}"}
+#     except Exception as e:
+#         logger.error(f"Error initializing AiZynthFinder: {e}", exc_info=True)
+#         return {"finder": None, "error": f"An unexpected error occurred during AiZynthFinder initialization: {str(e)}"}
+
 def initialize_aizynthfinder(config_path: str) -> dict:
-    """
-    Initialize AiZynthFinder with proper error handling.
-    Returns dict with 'finder' object and 'error' message if failed.
-    """
     try:
+        import yaml
         logger.info(f"Initializing AiZynthFinder with config: {config_path}")
         
-        # Validate config first
-        config_validation = validate_config_file(config_path)
-        if not config_validation["valid"]:
-            return {"finder": None, "error": config_validation["error"]}
+        # Read the original config
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
         
-        # Initialize AiZynthFinder
-        # AiZynthFinder resolves paths inside the config file relative to the config file's location.
-        finder = AiZynthFinder(configfile=config_path)
+        # Get the directory where the config file is located
+        config_dir = os.path.dirname(config_path)
         
-        logger.info("AiZynthFinder initialized successfully")
-        return {"finder": finder, "error": None}
+        # Resolve relative paths to absolute paths
+        if 'expansion' in config:
+            for policy_name, policy_config in config['expansion'].items():
+                if 'model' in policy_config and not os.path.isabs(policy_config['model']):
+                    config['expansion'][policy_name]['model'] = os.path.join(config_dir, policy_config['model'])
+                if 'template' in policy_config and not os.path.isabs(policy_config['template']):
+                    config['expansion'][policy_name]['template'] = os.path.join(config_dir, policy_config['template'])
         
-    except ImportError as e:
-        return {"finder": None, "error": f"Missing required dependencies for AiZynthFinder: {str(e)}"}
+        if 'filter' in config:
+            for filter_name, filter_config in config['filter'].items():
+                if 'model' in filter_config and not os.path.isabs(filter_config['model']):
+                    config['filter'][filter_name]['model'] = os.path.join(config_dir, filter_config['model'])
+        
+        if 'stock' in config:
+            for stock_name, stock_config in config['stock'].items():
+                if 'path' in stock_config and not os.path.isabs(stock_config['path']):
+                    config['stock'][stock_name]['path'] = os.path.join(config_dir, stock_config['path'])
+        
+        # Write the modified config to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_file:
+            yaml.dump(config, tmp_file)
+            tmp_config_path = tmp_file.name
+        
+        try:
+            # Initialize AiZynthFinder with the temporary config file
+            finder = AiZynthFinder(configfile=tmp_config_path)
+            logger.info("AiZynthFinder initialized successfully")
+            return {"finder": finder, "error": None}
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(tmp_config_path)
+            except Exception as e:
+                logger.warning(f"Could not delete temporary config file: {e}")
+        
     except Exception as e:
         logger.error(f"Error initializing AiZynthFinder: {e}", exc_info=True)
-        return {"finder": None, "error": f"An unexpected error occurred during AiZynthFinder initialization: {str(e)}"}
-    
+        return {"finder": None, "error": str(e)}
+
 def initialize_yield_predictor() -> AdvancedYieldPredictor | None:
     """
     Initialize the Advanced Yield Predictor with proper error handling.
@@ -317,7 +369,11 @@ def plan_synthesis_route(target_identifier: str) -> dict:
 
     try:
         # Initialize AiZynthFinder from the config file
-        finder = AiZynthFinder(configfile=config_path)
+        # finder = AiZynthFinder(configfile=config_path)
+        init_result = initialize_aizynthfinder(config_path)
+        if init_result["error"]:
+            return {"error": init_result["error"]}
+        finder = init_result["finder"]
         finder.target_smiles = target_smiles
         logger.info(f"Set target molecule: {target_smiles}")
         finder.stock.select("zinc")  # Matches the stock name in config.yml

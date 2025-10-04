@@ -21,8 +21,8 @@ policy:
 expansion:
   uspto:
     type: template-based
-    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_model.onnx
-    template: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_templates.csv.gz
+    model: ./uspto_model.onnx
+    template: ./uspto_templates.csv.gz
     template_column: retro_template
     cutoff_cumulative: 0.995
     cutoff_number: 50
@@ -30,8 +30,8 @@ expansion:
     use_remote_models: True
   ringbreaker:
     type: template-based
-    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_ringbreaker_model.onnx
-    template: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_ringbreaker_templates.csv.gz
+    model: ./uspto_ringbreaker_model.onnx
+    template: ./uspto_ringbreaker_templates.csv.gz
     template_column: retro_template
     cutoff_cumulative: 0.995
     cutoff_number: 50
@@ -41,7 +41,7 @@ expansion:
 filter:
   uspto:
     type: quick-filter
-    model: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/uspto_filter_model.onnx
+    model: ./uspto_filter_model.onnx
     exclude_from_policy: rc
     filter_cutoff: 0.05
     use_remote_models: True
@@ -49,16 +49,5 @@ filter:
 stock:
   zinc:
     type: inchiset
-    path: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/core_logic/zinc_stock.hdf5
-# expansion:
-#   uspto:
-#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_model.onnx
-#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_templates.csv.gz
-#   ringbreaker:
-#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_ringbreaker_model.onnx
-#     - /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_ringbreaker_templates.csv.gz
-# filter:
-#   uspto: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/uspto_filter_model.onnx
-# stock:
-#   zinc: /Users/anushtupnandy/Documents/projects/git-repos/chemsynth/chem_mvp/zinc_stock.hdf5
+    path: ./zinc_stock.hdf5
 
