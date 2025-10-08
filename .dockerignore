@@ -1,0 +1,13 @@
+# Ignore git and python cache files
+.git
+.gitignore
+__pycache__/
+*.pyc
+
+# Ignore local environment files
+.env
+
+# We don't need the local anaconda/venv environment
+.ipynb_checkpoints
+venv/
+*.egg-info

@@ -1,0 +1,15 @@
+name: chemsynth
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # 1. Core Conda dependencies (for stability)
+  - python=3.10.18
+  - rdkit
+  - pytorch
+  - torchvision
+  - torchaudio
+
+  # 2. All other packages installed via Pip
+  - pip:
+    - -r requirements.txt

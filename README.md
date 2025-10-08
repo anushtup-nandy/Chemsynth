@@ -1,5 +1,6 @@
-# ChemSynthAi
-**ChemsynthAI** is a comprehensive, AI-powered web platform designed to accelerate chemical synthesis research. It serves as a computational copilot for chemists, integrating literature analysis, multiple retrosynthesis strategies, reaction optimization, and logistical planning into a single, cohesive workflow.
+# ChemSynthAI
+
+**ChemSynthAI** is a comprehensive, AI-powered web platform designed to accelerate chemical synthesis research. It serves as a computational copilot for chemists, integrating literature analysis, multiple retrosynthesis strategies, reaction optimization, and logistical planning into a single, cohesive workflow.
 
 The platform leverages a hybrid approach, combining the structured, evidence-based predictions of traditional cheminformatics tools with the creative, pattern-recognition capabilities of modern large language models (LLMs) and deep learning.
 
@@ -15,52 +16,61 @@ The platform leverages a hybrid approach, combining the structured, evidence-bas
 - [Models and Datasets](#models-and-datasets)
 - [Technology Stack](#technology-stack)
 - [Installation and Setup](#installation-and-setup)
-  - [Prerequisites](#prerequisites)
-  - [Step-by-Step Installation](#step-by-step-installation)
-  - [Model and Configuration Setup](#model-and-configuration-setup)
+  - [Docker Installation (Recommended)](#docker-installation-recommended)
+  - [Manual Installation](#manual-installation)
 - [Running the Application](#running-the-application)
 - [API Endpoints](#api-endpoints)
+- [Project Structure](#project-structure)
 - [How to Contribute](#how-to-contribute)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
+
+---
 
 ## Core Philosophy
 
 Modern chemistry research is a data-intensive endeavor. The path from a target molecule to a viable synthesis protocol is fraught with challenges: sifting through vast literature, conceptualizing novel pathways, optimizing reaction conditions, and sourcing starting materials.
 
-**Synthesis Navigator AI** is built on the philosophy of **AI-Augmented Chemical Intuition**. Our goal is not to replace the expert chemist but to provide a powerful suite of computational tools that can:
+**ChemSynthAI** is built on the philosophy of **AI-Augmented Chemical Intuition**. Our goal is not to replace the expert chemist but to provide a powerful suite of computational tools that can:
 
-1.  **Automate Tedious Tasks:** Instantly perform comprehensive literature and patent searches that would take a human researcher hours or days.
-2.  **Expand the Search Space:** Generate a diverse set of plausible synthesis routes, including both canonical, literature-backed pathways and novel, AI-generated suggestions.
-3.  **Provide Data-Driven Insights:** Move beyond simple retrosynthesis to predict reaction yields, propose optimal conditions (catalysts, solvents, temperature), and analyze the economic viability of a route.
-4.  **Integrate and Synthesize Information:** Use LLMs to summarize findings, elaborate on reaction mechanisms, and present complex data in a clear, human-readable format.
+1. **Automate Tedious Tasks:** Instantly perform comprehensive literature and patent searches that would take a human researcher hours or days.
+2. **Expand the Search Space:** Generate a diverse set of plausible synthesis routes, including both canonical, literature-backed pathways and novel, AI-generated suggestions.
+3. **Provide Data-Driven Insights:** Move beyond simple retrosynthesis to predict reaction yields, propose optimal conditions (catalysts, solvents, temperature), and analyze the economic viability of a route.
+4. **Integrate and Synthesize Information:** Use LLMs to summarize findings, elaborate on reaction mechanisms, and present complex data in a clear, human-readable format.
 
 By blending deterministic algorithms (e.g., graph-based tree search) with probabilistic models (e.g., Transformers, generative models), the platform provides a robust, multi-faceted perspective on any synthesis problem.
 
+---
+
 ## Key Features
 
-- **Multi-Source Literature Analysis:**
-  - Performs a federated search across **arXiv**, **PubChem**, **Europe PMC**, and the general web (**DuckDuckGo**) to find relevant papers, patents, and technical articles.
-  - Employs a cascading search strategy, starting with highly specific queries and broadening the scope to ensure comprehensive coverage.
-  - Uses an intelligent scoring and filtering system to rank results based on chemical relevance, source credibility, and keyword matching, removing noise from irrelevant fields (e.g., astrophysics, economics).
+### Multi-Source Literature Analysis
+- Performs federated search across **arXiv**, **PubChem**, **PubMed**, **Europe PMC**, and the general web (**DuckDuckGo**)
+- Employs a cascading search strategy, starting with highly specific queries and broadening scope for comprehensive coverage
+- Uses intelligent scoring and filtering to rank results based on chemical relevance, source credibility, and keyword matching
+- Automatically filters out noise from irrelevant fields (e.g., astrophysics, economics)
 
-- **Hybrid Retrosynthesis Engine:**
-  - **AiZynthFinder Integration:** Utilizes the industry-standard `AiZynthFinder` tool to perform a rigorous, template-based retrosynthetic analysis, generating multi-step pathways grounded in known chemical reactions from the USPTO patent database.
-  - **ChemFM Generative Engine:** Leverages `ChemFM-3B`, a foundation model for chemistry, to propose novel, single-step synthesis routes, offering creative alternatives to established methods.
+### Hybrid Retrosynthesis Engine
+- **AiZynthFinder Integration:** Template-based, multi-step synthesis planning using USPTO patent database reactions
+- **ChemFM Generative Engine:** Leverages `ChemFM-3B` foundation model to propose novel, single-step synthesis routes
 
-- **Advanced Reaction Optimization & Analysis:**
-  - **AI-Powered Yield Prediction:** Integrates a two-stage deep learning pipeline. First, it predicts optimal reaction conditions (catalysts, reagents, solvents, temperature). Then, it feeds the fully-specified reaction into a Transformer-based model to predict the final yield with high accuracy.
-  - **Interactive Bayesian Optimization:** Empowers the user to perform on-demand, robust Bayesian Optimization for any synthesis step. This feature uses the **BayBE** library to intelligently explore the reaction condition space (temperature, solvents, reagents) to discover conditions that maximize yield, providing a data-driven path to process improvement.
-  - **Stoichiometric Balancing:** Automatically balances complex chemical equations using an Integer Linear Programming (ILP) solver, ensuring atom conservation and providing correct stoichiometric coefficients for all reactants, products, and byproducts.
+### Advanced Reaction Optimization & Analysis
+- **AI-Powered Yield Prediction:** Two-stage deep learning pipeline predicting optimal conditions and final yield
+- **Interactive Bayesian Optimization:** On-demand optimization using **BayBE** library to explore reaction condition space
+- **Stoichiometric Balancing:** Automatic equation balancing using Integer Linear Programming (ILP) solver
 
-- **Sourcing and Cost Analysis:**
-  - Identifies all required starting materials for a given synthesis route.
-  - Performs a stoichiometric flow-down calculation to determine the mass of each starting material needed to produce a target amount of the final product, accounting for the yield of each step.
-  - Queries chemical supplier databases (via PubChem and mock vendor APIs) to find availability and estimate the total cost of a synthesis route.
+### Sourcing and Cost Analysis
+- Identifies required starting materials for synthesis routes
+- Performs stoichiometric flow-down calculations accounting for step yields
+- Queries chemical supplier databases for availability and cost estimation
 
-- **LLM-Powered Elaboration:**
-  - Uses a general-purpose LLM (e.g., Google Gemini) to synthesize and format the output from various backend modules.
-  - The LLM generates human-readable descriptions of reaction steps, evaluates the pros and cons of a proposed route, and structures the final output into a clean JSON format for the frontend.
+### LLM-Powered Elaboration
+- Uses Google Gemini models to synthesize and format outputs
+- Generates human-readable descriptions of reaction steps
+- Evaluates pros/cons of proposed routes
+- Structures final output into clean JSON format for frontend
+
+---
 
 ## System Architecture
 
@@ -97,7 +107,7 @@ graph TD
     B -- Generate New Route --> D
     B -- Literature Search --> E
     B -- Analyze Sourcing --> F
-    B -- Optimize Reaction (On-Demand) --> BO
+    B -- Optimize Reaction --> BO
     C -- Uses --> G
     C -- Uses --> H
     C -- Uses --> I
@@ -114,299 +124,471 @@ graph TD
     F -- Calls --> M
 ```
 
-**Component Breakdown:**
+### Component Breakdown
 
-1.  **Flask App (`app.py`):** The main entry point. It exposes all REST API endpoints, handles request validation, and orchestrates calls to the various core logic modules.
-2.  **Synthesis Planner (`synthesis_planner.py`):** The primary module for retrosynthesis. It initializes `AiZynthFinder`, runs the tree search, processes the resulting routes, and integrates yield prediction, balancing, and LLM elaboration for each step.
-3.  **ChemFM Engine (`chemfm_synthesis_engine.py`):** A specialized module that queries the `ChemFM` model to generate a single-step retrosynthesis. It pipelines this result into the yield optimizer and LLM formatter.
-4.  **Bayesian Optimizer (`bayopt_react.py`):** An on-demand core logic module that performs robust, multi-iteration optimization of reaction conditions using the `baybe` library. It is triggered by the user from the frontend for any given reaction step.
-5.  **Literature Analyzer (`literature_analysis.py`):** Orchestrates parallel searches across multiple scientific databases. It includes logic for deduplicating, scoring, and ranking results for relevance.
-6.  **Sourcing Analyzer (`sourcing_analysis.py`):** Contains the logic for calculating reagent mass requirements and querying supplier information. It includes a cache and fallback mechanisms for robustness.
-7.  **Yield Optimizer (`yield_optimizer.py`):** A critical ML utility module that wraps two separate neural networks: one for predicting conditions and another for predicting yield. It serves both initial fast predictions and is used repeatedly by the Bayesian Optimizer.
-8.  **Utilities (`utils/`):** A collection of helper modules for common tasks like interfacing with the LLM API (`llm_interface.py`), loading prompts (`prompt_loader.py`), and communicating with specific databases (`arxiv_processor.py`, `pubchem_processor.py`, etc.).
+1. **Flask App (`app.py`):** Main entry point exposing REST API endpoints, handling request validation, and orchestrating core logic modules
+2. **Synthesis Planner (`synthesis_planner.py`):** Primary retrosynthesis module initializing AiZynthFinder and processing routes
+3. **ChemFM Engine (`chemfm_synthesis_engine.py`):** Queries ChemFM model for single-step retrosynthesis generation
+4. **Bayesian Optimizer (`bayopt_react.py`):** On-demand optimization of reaction conditions using BayBE library
+5. **Literature Analyzer (`literature_analysis.py`):** Orchestrates parallel searches across scientific databases
+6. **Sourcing Analyzer (`sourcing_analysis.py`):** Calculates reagent requirements and queries supplier information
+7. **Yield Optimizer (`yield_optimizer.py`):** Wraps neural networks for condition and yield prediction
+8. **Utilities (`utils/`):** Helper modules for LLM API, prompt loading, and database communication
+
+---
 
 ## Models and Datasets
 
-The platform's capabilities are powered by a suite of state-of-the-art models and public datasets.
+| Component | Model / Dataset | Source | Purpose |
+|-----------|----------------|--------|---------|
+| **Retrosynthesis** | AiZynthFinder with USPTO models | Local (`core_logic/`) | Template-based, multi-step synthesis planning |
+| **Retrosynthesis** | ChemFM-3B | Hugging Face Hub | Generative, single-step synthesis suggestion |
+| **Condition Prediction** | NeuralNetContextRecommender (RCR) | Local (`models/model 2/`) | Predicts catalyst, solvent, reagent, temperature |
+| **Yield Prediction** | SmilesClassificationModel (Transformer) | Local (`models/model/`) | Predicts reaction yield percentage |
+| **Yield Optimization** | BayBE with Gaussian Process | `baybe` Python package | On-demand, iterative optimization |
+| **Purchasable Reagents** | ZINC In-Stock Database | Local (`core_logic/zinc_stock.hdf5`) | Commercially available starting materials |
+| **Literature** | PubChem, PubMed, arXiv, Europe PMC | Public APIs | Academic papers, patents, and articles |
+| **General Knowledge** | Google Gemini family | Google AI Platform API | Text generation, summarization, formatting |
+| **Thermodynamics** | chemicals library dataset | `chemicals` Python package | Enthalpy, entropy, boiling/melting points |
 
-| Component                 | Model / Dataset                                                                                                 | Source                                                                             | Purpose                                                 |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| **Retrosynthesis**        | `AiZynthFinder` with USPTO models                                                                               | `aizynthfinder` package                                                            | Template-based, multi-step synthesis planning.        |
-| **Retrosynthesis**        | `ChemFM-3B`                                                                                                     | Hugging Face Hub (`ChemFM/ChemFM-3B`)                                              | Generative, single-step synthesis suggestion.         |
-| **Condition Prediction**  | Custom `NeuralNetContextRecommender` (RCR)                                                                      | Local (`models/model 2/`)                                                          | Predicts catalyst, solvent, reagent, temperature.     |
-| **Yield Prediction**      | Custom Transformer `SmilesClassificationModel`                                                                  | Local (`models/model/`)                                                            | Predicts reaction yield percentage.                     |
-| **Yield Optimization**    | `baybe` library with Gaussian Process surrogate                                                                 | `baybe` Python package                                                             | On-demand, iterative optimization of reaction yield.    |
-| **Purchasable Reagents**  | ZINC In-Stock Database (`zinc_stock.hdf5`)                                                                      | ZINC Database                                                                      | Defines commercially available starting materials.      |
-| **Literature**            | PubChem, PubMed, arXiv, Europe PMC                                                                              | Public APIs                                                                        | Sourcing academic papers, patents, and articles.      |
-| **General Knowledge**     | Google Gemini family of models                                                                                  | Google AI Platform API                                                             | Text generation, summarization, and formatting.         |
-| **Thermodynamics**        | `chemicals` library dataset                                                                                     | `chemicals` Python package                                                         | Enthalpy, entropy, boiling/melting points for balancing.|
+---
 
 ## Technology Stack
 
-- **Backend Framework:** Flask
-- **Machine Learning:** PyTorch, Hugging Face Transformers, JAX (via ChemFM dependencies)
+- **Containerization:** Docker
+- **Backend Framework:** Flask, Gunicorn
+- **Machine Learning:** PyTorch, Hugging Face Transformers, JAX
 - **Bayesian Optimization:** BayBE
 - **Cheminformatics:** RDKit, AiZynthFinder, PubChemPy
 - **Numerical Computing:** NumPy, Pandas, SciPy
-- **Scientific Libraries:** `chemicals`, `pulp` (for ILP)
-- **API Interaction:** `requests`, `arxiv`, `biopython`
-- **Environment:** Conda (recommended for managing complex dependencies)
+- **Scientific Libraries:** chemicals, pulp (ILP)
+- **API Interaction:** requests, arxiv, biopython
+- **Environment Management:** Conda
+
+---
 
 ## Installation and Setup
 
-### Prerequisites
+### Docker Installation (Recommended)
 
+Using Docker is the **recommended method** for running this application. It guarantees a consistent and reproducible environment, automatically handling all complex Python and system dependencies.
+
+#### Prerequisites
+- [Git](https://git-scm.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux)
+
+#### Steps
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/your-username/ChemSynthAI.git
+   cd ChemSynthAI
+   ```
+
+2. **Configure Models (Before Building)**
+   
+   Download and place models in local directories:
+   - **AiZynthFinder Models:** Download USPTO models and place in `core_logic/`
+   - **Custom Models:** Place yield/condition models in `models/model/` and `models/model 2/`
+   - **ZINC Database:** Place `zinc_stock.hdf5` in `core_logic/`
+   
+   Create `core_logic/config.yml` with **container paths**:
+   ```yaml
+   policy:
+     uspto:
+       type: "template-based"
+       model: "/app/core_logic/uspto_model.onnx"
+       templates: "/app/core_logic/uspto_templates.csv.gz"
+     ringbreaker:
+       type: "template-based"
+       model: "/app/core_logic/uspto_ringbreaker_model.onnx"
+       templates: "/app/core_logic/uspto_ringbreaker_templates.csv.gz"
+     filter:
+       uspto:
+         type: "neural-network"
+         model: "/app/core_logic/uspto_filter_model.onnx"
+
+   stock:
+     zinc:
+       type: "hdf5"
+       path: "/app/core_logic/zinc_stock.hdf5"
+   ```
+   *Note: Use `/app/` paths since these will be mounted inside the container*
+
+3. **Set Up Environment Variables**
+   Create a `.env` file in the root directory:
+   ```ini
+   # .env
+   GEMINI_API_KEY="your_google_ai_platform_api_key"
+   EMAIL="your_email_for_ncbi_api@example.com"
+   ```
+
+4. **Build Docker Image**
+   ```bash
+   docker build -t chemsynth-ai .
+   ```
+
+5. **Run with Volume Mounts**
+   ```bash
+   docker run -d \
+     -p 5000:5000 \
+     --name chemsynth-container \
+     --env-file .env \
+     -v "$(pwd)/core_logic:/app/core_logic" \
+     -v "$(pwd)/models:/app/models" \
+     chemsynth-ai
+   ```
+   
+   **What these flags do:**
+   - `-d`: Run in detached mode (background)
+   - `-p 5000:5000`: Map port 5000 (host:container)
+   - `--name`: Give container a memorable name
+   - `--env-file`: Load API keys from `.env`
+   - `-v`: Mount local model directories into container
+   
+   This approach keeps models on your host machine and shares them with the container. **No reconfiguration needed** once models are set up locally!
+
+6. **Access the Application**
+   Open your browser to `http://localhost:5000`
+
+7. **View Logs (Optional)**
+   ```bash
+   docker logs -f chemsynth-container
+   ```
+
+8. **Stop the Container**
+   ```bash
+   docker stop chemsynth-container
+   docker rm chemsynth-container
+   ```
+
+---
+
+### Manual Installation
+
+#### Prerequisites
 - Python 3.9+
 - Conda package manager
 - Git
 
-### Step-by-Step Installation
+#### Steps
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/your-username/Chemsynth.git
-    cd Chemsynth
-    ```
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/your-username/ChemSynthAI.git
+   cd ChemSynthAI
+   ```
 
-2.  **Create and Activate Conda Environment**
-    It is highly recommended to use a dedicated Conda environment to manage the complex dependencies of `rdkit`, `pytorch`, and `aizynthfinder`.
+2. **Create and Activate Conda Environment**
+   ```bash
+   conda create -n chemsynth python=3.9
+   conda activate chemsynth
+   ```
 
-    ```bash
-    conda create -n chemsynth python=3.9
-    conda activate chemsynth
-    ```
+3. **Install Core Dependencies**
+   ```bash
+   conda install -c conda-forge rdkit pytorch torchvision torchaudio -y
+   ```
 
-3.  **Install Core Dependencies**
-    Install `rdkit` and `pytorch` from the `conda-forge` channel for best compatibility.
+4. **Install Python Packages**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-    ```bash
-    conda install -c conda-forge rdkit pytorch torchvision torchaudio -y
-    ```
+5. **Download and Configure Models**
 
-4.  **Install AiZynthFinder and Other Python Packages**
-    Create a `requirements.txt` file with the following content:
-    ```txt
-    # requirements.txt
-    aizynthfinder
-    flask
-    numpy
-    pandas
-    scipy
-    huggingface_hub
-    transformers
-    tensorflow  # Often a dependency for aizynthfinder models
-    pulp
-    pubchempy
-    biopython
-    arxiv
-    python-dotenv
-    PyYAML
-    requests
-    duckduckgo_search
-    chemicals
-    ```
-    Then, install them using `pip`:
-    ```bash
-    pip install -r requirements.txt
-    ```
+   Create model directories:
+   ```bash
+   mkdir -p models/model models/model\ 2
+   ```
 
-### Model and Configuration Setup
+   Download models and place in respective directories:
+   - **AiZynthFinder Models:** Follow [official instructions](https://github.com/MolecularAI/aizynthfinder)
+   - **Custom Models:** Place in `models/model` and `models/model 2`
 
-1.  **Create Model Directories**
-    The application expects local models to be in a specific structure.
+6. **Configure AiZynthFinder**
+   
+   Create `core_logic/config.yml`:
+   ```yaml
+   policy:
+     uspto:
+       type: "template-based"
+       model: "/path/to/uspto_model.onnx"
+       templates: "/path/to/uspto_templates.csv.gz"
+     ringbreaker:
+       type: "template-based"
+       model: "/path/to/uspto_ringbreaker_model.onnx"
+       templates: "/path/to/uspto_ringbreaker_templates.csv.gz"
+     filter:
+       uspto:
+         type: "neural-network"
+         model: "/path/to/uspto_filter_model.onnx"
 
-    ```bash
-    mkdir -p models/model models/model\ 2
-    ```
+   stock:
+     zinc:
+       type: "hdf5"
+       path: "/path/to/zinc_stock.hdf5"
+   ```
 
-2.  **Download and Place Models**
-    - **AiZynthFinder Models:** Follow the [official AiZynthFinder instructions](https://github.com/MolecularAI/aizynthfinder) to download the policy models and the stock data (`zinc_stock.hdf5`). Place them in a location accessible to the application.
-    - **Custom Yield/Condition Models:** Download the `model` and `model 2` directories from your model repository and place their contents into the respective directories created above.
+7. **Set Up Environment Variables**
+   ```bash
+   # Create .env file
+   echo 'GEMINI_API_KEY="your_api_key"' > .env
+   echo 'EMAIL="your_email@example.com"' >> .env
+   ```
 
-3.  **Configure AiZynthFinder**
-    Create a `config.yml` file in the `core_logic/` directory. This file tells `AiZynthFinder` where to find its models and stock data. **Update the paths to match your system.**
-
-    ```yaml
-    # core_logic/config.yml
-    policy:
-      uspto:
-        type: "template-based"
-        model: "/path/to/your/aizynthfinder/models/uspto-expansion.onnx"
-        templates: "/path/to/your/aizynthfinder/models/uspto-expansion.csv.gz"
-      ringbreaker:
-        type: "template-based"
-        model: "/path/to/your/aizynthfinder/models/ringbreaker-expansion.onnx"
-        templates: "/path/to/your/aizynthfinder/models/ringbreaker-expansion.csv.gz"
-      
-      # Filter policy is separate
-      filter:
-        uspto:
-          type: "neural-network"
-          model: "/path/to/your/aizynthfinder/models/uspto-filter.onnx"
-
-    stock:
-      zinc:
-        type: "hdf5"
-        path: "/path/to/your/zinc_stock.hdf5"
-    ```
-
-4.  **Set Up Environment Variables**
-    Create a `.env` file in the root directory of the project to store your API keys and other secrets.
-
-    ```ini
-    # .env
-    GEMINI_API_KEY="your_google_ai_platform_api_key"
-    EMAIL="your_email_for_ncbi_api@example.com"
-    # Optional: TOR proxy settings for web searcher
-    # TOR_PROXY_IP="127.0.0.1"
-    # TOR_PROXY_PORT="9050"
-    ```
+---
 
 ## Running the Application
 
-Once all dependencies are installed and configurations are in place, you can run the Flask web server:
+### With Docker
+```bash
+docker run -p 5000:5000 --env-file .env chemsynthai
+```
 
+### Manual
 ```bash
 conda activate chemsynth
 python app.py
 ```
 
-The application will be available at `http://127.0.0.1:5000`.
+The application will be available at `http://127.0.0.1:5000`
+
+---
 
 ## API Endpoints
 
-The application exposes a REST API for programmatic access.
+### `POST /api/resolve_identifier`
+Resolves a chemical identifier to canonical SMILES.
+
+**Request:**
+```json
+{ "identifier": "aspirin" }
+```
+
+**Response:**
+```json
+{
+  "smiles": "CC(=O)OC1=CC=CC=C1C(=O)O",
+  "name": "Aspirin",
+  "synonyms": ["Aspirin", "2-acetyloxybenzoic acid"]
+}
+```
 
 ---
-**`POST /api/resolve_identifier`**
--   Resolves a chemical identifier (Name, CAS, SMILES) to a canonical SMILES string and common name.
--   **Request Body:**
-    ```json
-    { "identifier": "aspirin" }
-    ```
--   **Success Response (200):**
-    ```json
+
+### `POST /api/literature_search`
+Performs comprehensive literature search.
+
+**Request:**
+```json
+{
+  "query": "Ibuprofen",
+  "max_results": 5
+}
+```
+
+**Response:**
+```json
+{
+  "papers": [
     {
-      "smiles": "CC(=O)OC1=CC=CC=C1C(=O)O",
-      "name": "Aspirin",
-      "synonyms": ["Aspirin", "2-acetyloxybenzoic acid", ...]
+      "title": "Synthesis of Ibuprofen...",
+      "source": "Doe J, et al. (2021)",
+      "abstract": "...",
+      "url": "https://doi.org/...",
+      "relevance_score": 25
     }
-    ```
+  ],
+  "web_results": [],
+  "search_info": {}
+}
+```
+
 ---
-**`POST /api/literature_search`**
--   Performs a comprehensive literature search.
--   **Request Body:**
-    ```json
+
+### `POST /api/plan_synthesis`
+Generates multi-step synthesis routes.
+
+**Request:**
+```json
+{ "identifier": "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O" }
+```
+
+**Response:**
+```json
+{
+  "routes": [
     {
-      "query": "Ibuprofen",
-      "max_results": 5
-    }
-    ```
--   **Success Response (200):**
-    ```json
-    {
-      "papers": [
+      "id": "route_a",
+      "overall_yield": 75.2,
+      "steps": [
         {
-          "title": "Synthesis of Ibuprofen...",
-          "source": "Doe J, et al. (2021) - PubChem/PubMed",
-          "abstract": "The synthesis of ibuprofen was achieved...",
-          "url": "https://doi.org/...",
-          "relevance_score": 25
+          "step_number": 1,
+          "title": "Friedel-Crafts Acylation",
+          "yield": 85.0,
+          "reagents_conditions": "Catalyst: AlCl3",
+          "product": {"smiles": "...", "coeff": 1},
+          "reactants": [{"smiles": "...", "coeff": 1}],
+          "reaction_image_url": "/static/reactions/..."
         }
       ],
-      "web_results": [...],
-      "search_info": { ... }
+      "evaluation": {
+        "advantages": "Uses common starting materials",
+        "challenges": "Moderate yield in final step"
+      }
     }
-    ```
+  ]
+}
+```
+
 ---
-**`POST /api/plan_synthesis`**
--   Generates multi-step synthesis routes using `AiZynthFinder`.
--   **Request Body:**
-    ```json
-    { "identifier": "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O" }
-    ```
--   **Success Response (200):**
-    ```json
-    {
-      "routes": [
-        {
-          "id": "route_a",
-          "overall_yield": 75.2,
-          "steps": [
-            {
-              "step_number": 1,
-              "title": "Friedel-Crafts Acylation",
-              "yield": 85.0,
-              "reagents_conditions": "Catalyst: AlCl3; ...",
-              "product": {"smiles": "...", "coeff": 1},
-              "reactants": [{"smiles": "...", "coeff": 1}],
-              "reaction_image_url": "/static/reactions/..."
-            }
-          ],
-          "evaluation": {
-            "advantages": "Uses common starting materials.",
-            "challenges": "The final step has a moderate yield."
-          }
-        }
-      ]
-    }
-    ```
+
+### `POST /api/generate_new_route`
+Generates novel route using ChemFM.
+
+**Request:**
+```json
+{
+  "target_smiles": "...",
+  "suggestion": "Propose a route using Suzuki coupling"
+}
+```
+
+**Response:**
+```json
+{ "new_route": { } }
+```
+
 ---
-**`POST /api/generate_new_route`**
--   Generates a novel, single-step route using `ChemFM`.
--   **Request Body:**
-    ```json
-    {
-      "target_smiles": "...",
-      "suggestion": "Propose a route using a Suzuki coupling."
+
+### `POST /api/analyze_sourcing`
+Analyzes cost and sourcing logistics.
+
+**Request:**
+```json
+{
+  "route_steps": [],
+  "target_amount_g": 10.0
+}
+```
+
+**Response:**
+```json
+{
+  "total_cost": 250.75,
+  "sourcing_details": {
+    "smiles": {
+      "name": "...",
+      "required_amount_g": 15.2,
+      "estimated_cost": 120.50,
+      "suppliers": []
     }
-    ```
--   **Success Response (200):**
-    ```json
-    { "new_route": { ... } } // Same format as a single route from /api/plan_synthesis
-    ```
+  }
+}
+```
+
 ---
-**`POST /api/analyze_sourcing`**
--   Analyzes the cost and sourcing logistics for a given route.
--   **Request Body:**
-    ```json
-    {
-      "route_steps": [ ... ], // The "steps" array from a planned route
-      "target_amount_g": 10.0
-    }
-    ```
--   **Success Response (200):**
-    ```json
-    {
-      "total_cost": 250.75,
-      "sourcing_details": {
-        "smiles_of_reagent": {
-          "name": "...",
-          "required_amount_g": 15.2,
-          "estimated_cost": 120.50,
-          "suppliers": [ ... ]
-        }
-      },
-      ...
-    }
-    ```
+
+### `GET /api/health`
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "pubchem_available": true
+}
+```
+
 ---
-**`GET /api/health`**
--   A health check endpoint to verify system status.
--   **Success Response (200):**
-    ```json
-    {
-        "status": "healthy",
-        "pubchem_available": true,
-        ...
-    }
-    ```
+
+## Project Structure
+
+```
+ChemSynthAI/
+├── core_logic/
+│   ├── chemfm_synthesis_engine.py
+│   ├── config.yml
+│   ├── literature_analysis.py
+│   ├── sourcing_analysis.py
+│   ├── synthesis_planner.py
+│   ├── uspto_filter_model.onnx
+│   ├── uspto_model.onnx
+│   ├── uspto_ringbreaker_model.onnx
+│   ├── uspto_ringbreaker_templates.csv.gz
+│   ├── uspto_templates.csv.gz
+│   └── zinc_stock.hdf5
+├── models/
+│   ├── model/                     # Yield prediction model
+│   ├── model 2/                   # Condition prediction model
+│   └── packages/
+│       ├── rcr_torch_version/
+│       └── yield_predictor/
+├── static/
+│   ├── css/
+│   ├── js/
+│   └── reaction_images/
+├── templates/
+│   └── index.html
+├── utils/
+│   ├── prompts/
+│   ├── arxiv_processor.py
+│   ├── balance_reaction.py
+│   ├── bayopt_backup.py
+│   ├── bayopt_react.py
+│   ├── chemrxiv.py
+│   ├── custom_tokenizer.py
+│   ├── europe_pmc_processor.py
+│   ├── github_analyzer.py
+│   ├── google_patents_processor.py
+│   ├── llm_interface.py
+│   ├── prompt_loader.py
+│   ├── pubchem_processor.py
+│   ├── reaction_utils.py
+│   ├── scifinder_processor.py
+│   ├── semantic_scholar_processor.py
+│   ├── web_scraper.py
+│   ├── web_searcher.py
+│   └── yield_optimizer.py
+├── app.py
+├── config.py
+├── requirements.txt
+├── .env
+├── .gitignore
+└── README.md
+```
+
+---
+
+## How to Contribute
+
+We welcome contributions from the community! Please follow these guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
 ---
 
 ## Acknowledgments
 
-This platform would not be possible without the foundational work of many researchers and developers. We extend our sincere gratitude to:
--   The **RDKit** team for providing the essential open-source cheminformatics toolkit.
--   The **Molecular AI** group at AstraZeneca for developing and maintaining **AiZynthFinder**.
--   The researchers behind **ChemFM** for creating a powerful foundation model for chemistry.
--   The developers of **PubChemPy**, **BioPython**, and the numerous other open-source libraries that form the backbone of this application.
+This platform would not be possible without the foundational work of many researchers and developers:
+
+- The **RDKit** team for the essential open-source cheminformatics toolkit
+- The **Molecular AI** group at AstraZeneca for developing **AiZynthFinder**
+- The researchers behind **ChemFM** for creating a powerful foundation model for chemistry
+- The developers of **PubChemPy**, **BioPython**, **BayBE**, and numerous other open-source libraries
+- The scientific community for maintaining open databases like PubChem, PubMed, arXiv, and Europe PMC
+
+---
+
+**ChemSynthAI** - Accelerating chemistry research through intelligent automation and AI-powered insights.

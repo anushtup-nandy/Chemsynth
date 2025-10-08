@@ -236,32 +236,6 @@ def validate_config_file(config_path: str) -> dict:
         return {"valid": False, "error": f"Error reading or validating config file: {str(e)}"}
 
 
-# def initialize_aizynthfinder(config_path: str) -> dict:
-#     """
-#     Initialize AiZynthFinder with proper error handling.
-#     Returns dict with 'finder' object and 'error' message if failed.
-#     """
-#     try:
-#         logger.info(f"Initializing AiZynthFinder with config: {config_path}")
-#         
-#         # Validate config first
-#         config_validation = validate_config_file(config_path)
-#         if not config_validation["valid"]:
-#             return {"finder": None, "error": config_validation["error"]}
-#         
-#         # Initialize AiZynthFinder
-#         # AiZynthFinder resolves paths inside the config file relative to the config file's location.
-#         finder = AiZynthFinder(configfile=config_path)
-#         
-#         logger.info("AiZynthFinder initialized successfully")
-#         return {"finder": finder, "error": None}
-#         
-#     except ImportError as e:
-#         return {"finder": None, "error": f"Missing required dependencies for AiZynthFinder: {str(e)}"}
-#     except Exception as e:
-#         logger.error(f"Error initializing AiZynthFinder: {e}", exc_info=True)
-#         return {"finder": None, "error": f"An unexpected error occurred during AiZynthFinder initialization: {str(e)}"}
-
 def initialize_aizynthfinder(config_path: str) -> dict:
     try:
         import yaml
@@ -369,7 +343,6 @@ def plan_synthesis_route(target_identifier: str) -> dict:
 
     try:
         # Initialize AiZynthFinder from the config file
-        # finder = AiZynthFinder(configfile=config_path)
         init_result = initialize_aizynthfinder(config_path)
         if init_result["error"]:
             return {"error": init_result["error"]}
