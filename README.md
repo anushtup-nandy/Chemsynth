@@ -573,12 +573,6 @@ We welcome contributions from the community! Please follow these guidelines:
 
 ---
 
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
----
-
 ## Acknowledgments
 
 This platform would not be possible without the foundational work of many researchers and developers:
